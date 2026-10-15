@@ -1,0 +1,23 @@
+name: publish-release
+on:
+  push:
+    branches: [main]
+    paths: ['parts/**']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Join the zip and check it
+        run: |
+          cat $(ls parts/Playtime613-Windows.zip.part* | sort) > Playtime613-Windows.zip
+          ls -l Playtime613-Windows.zip
+          echo "04e315e6ab7e42892f86b12a7cfbce7e658d0fa4c2c3b798a51c9640c4fac4bf  Playtime613-Windows.zip" | sha256sum -c -
+          unzip -l Playtime613-Windows.zip
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create v1.0.5 Playtime613-Windows.zip --repo "$GITHUB_REPOSITORY" --title "Playtime613 1.0.5 for Windows" --notes "Playtime613 1.0.5 for Windows 10 and 11. New: a Parents button at the top of the home screen, works without the internet, forgot-PIN with your licence key, and updates inside the app from now on. Unzip, then double-click Playtime613.exe. See https://playtime613.com" --latest
