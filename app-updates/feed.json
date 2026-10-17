@@ -1,6 +1,13 @@
 {
  "notes": [
   {
+   "v": "1.0.7",
+   "date": "17 Oct 2026",
+   "items": [
+    "Pickle Boy: fixed Mission 5, the third secret formula can now be reached with a super leap."
+   ]
+  },
+  {
    "v": "1.0.6",
    "date": "17 Oct 2026",
    "items": [
@@ -18,9 +25,9 @@
    ]
   }
  ],
- "latest": "1.0.6",
+ "latest": "1.0.7",
  "min_app": "1.0.5",
- "manifest": "1.0.6/manifest.json",
+ "manifest": "1.0.7/manifest.json",
  "objects": "objects/",
  "download": "https://github.com/yossi93/playtime613-downloads/releases/download/v1.0.6/Playtime613-Windows.zip",
  "download_page": "https://playtime613.com/",
