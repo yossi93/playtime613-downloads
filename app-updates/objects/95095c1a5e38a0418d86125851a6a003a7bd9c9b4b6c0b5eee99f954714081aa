@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="frame-src 'self' about: data: blob:">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Playtime613</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#17204A;color:#fff;font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;overflow:hidden}
+#home{position:absolute;inset:0;overflow-y:auto;background:radial-gradient(1200px 600px at 15% -10%,#26357f 0%,transparent 60%),radial-gradient(900px 500px at 100% 0%,#8a3348 0%,transparent 55%),#17204A}
+header{display:flex;align-items:center;gap:14px;padding:26px 36px 8px}
+.logo-mark{width:52px;height:52px;border-radius:14px;background:#FFC629;color:#17204A;display:flex;align-items:center;justify-content:center;font-size:30px;box-shadow:0 4px 0 #C96A00}
+.logo-img{height:76px;width:auto;display:block;filter:drop-shadow(0 4px 10px rgba(0,0,0,.3))}
+.logo-name{font-size:34px;font-weight:800;letter-spacing:.3px}
+.logo-name b{color:#FFC629}
+.sub{padding:0 36px 18px;color:rgba(255,255,255,.72);font-size:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:20px;padding:4px 36px 26px}
+.tile{position:relative;background:#222d63;border:2px solid rgba(255,255,255,.08);border-radius:18px;overflow:hidden;cursor:pointer;text-align:left;color:inherit;font:inherit;padding:0;transition:transform .12s,border-color .12s,box-shadow .12s;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+.tile:hover,.tile:focus-visible{transform:translateY(-3px);border-color:#FFC629;outline:none;box-shadow:0 10px 26px rgba(0,0,0,.35)}
+.tw{position:relative}
+.thumb{position:relative;aspect-ratio:16/10;background:#2c3870;display:flex;align-items:center;justify-content:center;font-size:64px;overflow:hidden}
+.thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.emo{position:absolute;left:10px;bottom:-22px;width:46px;height:46px;border-radius:12px;background:#FFC629;display:flex;align-items:center;justify-content:center;font-size:26px;box-shadow:0 3px 0 #C96A00;z-index:2}
+.meta{padding:28px 14px 16px}
+.meta h3{margin:0 0 6px;font-size:18px;line-height:1.2}
+.meta p{margin:0;font-size:13.5px;line-height:1.4;color:rgba(255,255,255,.7)}
+.play{position:absolute;right:12px;bottom:14px;background:#2dcc70;color:#10261a;font-weight:800;font-size:13px;border-radius:999px;padding:5px 12px;opacity:0;transition:opacity .12s}
+.tile:hover .play{opacity:1}
+footer{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 36px 30px;color:rgba(255,255,255,.55);font-size:13px}
+footer button{font:inherit;font-weight:700;font-size:14px;color:#fff;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:8px 16px;cursor:pointer}
+footer button:hover{background:rgba(255,255,255,.18)}
+footer .ver{margin-left:auto}
+#play{position:absolute;inset:0;display:none;flex-direction:column;background:#000}
+#bar{height:40px;flex:0 0 40px;display:flex;align-items:center;gap:10px;padding:0 10px;background:#17204A;border-bottom:1px solid rgba(255,255,255,.12)}
+#bar button{font:inherit;font-weight:800;font-size:14px;color:#17204A;background:#FFC629;border:0;border-radius:999px;padding:6px 14px;cursor:pointer;box-shadow:0 2px 0 #C96A00}
+#bar button.ghost{background:rgba(255,255,255,.12);color:#fff;box-shadow:none}
+#bar .t{flex:1;text-align:center;font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#fw{flex:1;position:relative;overflow:hidden;background:#000}
+#frame{position:absolute;left:0;top:0;width:100%;height:100%;border:0;background:#000;display:block;transform-origin:0 0}
+#pick{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:8}
+#pick .pk{background:#fff;color:#17204A;border-radius:18px;padding:22px 24px;width:min(460px,90vw);max-height:80vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+#pick h3{margin:0 0 8px}#pick p{margin:6px 0 12px;font-size:14px;line-height:1.4}#pick .small{font-size:12px;color:#665}
+#pick .pf{display:block;width:100%;text-align:left;font:inherit;font-weight:700;padding:10px 14px;margin:6px 0;border-radius:12px;border:2px solid #e6e0f5;background:#f7f4ff;cursor:pointer}#pick .pf:hover{border-color:#FFC629}
+#pick .pc{font:inherit;font-weight:700;padding:8px 16px;border-radius:999px;border:0;background:#eee;cursor:pointer}
+#toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#fff;color:#17204A;font-weight:700;padding:10px 18px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.4);display:none;z-index:9;max-width:80vw;text-align:center}
+/* ---------- players ---------- */
+header .who-chip{margin-left:auto;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:5px 6px 5px 6px}
+.who-chip .av{width:44px;height:44px;font-size:30px}
+.who-chip .nm{font-weight:800;font-size:17px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who-chip button{font:inherit;font-weight:800;font-size:14px;color:#17204A;background:#FFC629;border:0;border-radius:999px;padding:9px 16px;cursor:pointer;box-shadow:0 2px 0 #C96A00}
+.av{display:flex;align-items:center;justify-content:center;border-radius:50%;background:#ffe9a6;line-height:1;flex:0 0 auto;overflow:hidden}
+.av svg{width:100%;height:100%;display:block}
+#who{position:absolute;inset:0;z-index:6;overflow-y:auto;display:none;background:radial-gradient(1100px 600px at 50% -10%,#2c3d8f 0%,transparent 65%),#17204A;text-align:center}
+#who h1{margin:46px 0 6px;font-size:46px;font-weight:900;letter-spacing:.3px}
+#who .hint{color:rgba(255,255,255,.72);font-size:17px;margin:0 0 26px}
+#who .pgrid{display:flex;flex-wrap:wrap;justify-content:center;gap:24px;padding:0 40px 30px;max-width:1180px;margin:0 auto}
+.ptile{position:relative;width:200px;background:#222d63;border:3px solid rgba(255,255,255,.1);border-radius:24px;padding:22px 12px 18px;cursor:pointer;color:#fff;font:inherit;transition:transform .12s,border-color .12s;box-shadow:0 8px 22px rgba(0,0,0,.3)}
+.ptile:hover,.ptile:focus-visible{transform:translateY(-4px) scale(1.03);border-color:#FFC629;outline:none}
+.ptile.lastp{border-color:#2dcc70}
+.ptile .av{width:120px;height:120px;font-size:78px;margin:0 auto 14px;box-shadow:0 5px 0 rgba(0,0,0,.25)}
+.ptile .pn{font-size:22px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptile .ps{font-size:13px;color:rgba(255,255,255,.6);margin-top:4px;min-height:17px}
+.ptile .lastb{position:absolute;top:-12px;left:50%;transform:translateX(-50%);white-space:nowrap;background:#2dcc70;color:#10261a;font-size:11px;font-weight:900;border-radius:999px;padding:3px 8px}
+.ptile .ed{position:absolute;top:8px;right:8px;width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:18px;cursor:pointer}
+.ptile .ed:hover{background:rgba(255,255,255,.28)}
+.ptile.add{border-style:dashed;background:rgba(255,255,255,.04)}
+.ptile.add .av{background:rgba(255,255,255,.1);color:#FFC629;font-size:70px;font-weight:300}
+#who .wfoot{color:rgba(255,255,255,.45);font-size:13px;padding:0 0 30px}
+#pick input.nmi{width:100%;font:inherit;font-size:20px;font-weight:700;padding:10px 14px;border-radius:12px;border:2px solid #d9d0f2;margin:4px 0 12px;color:#17204A}
+#pick input.nmi:focus{outline:none;border-color:#7a5cff}
+#pick .avs{display:grid;grid-template-columns:repeat(12,1fr);gap:6px;margin:4px 0 14px}
+#pick .avs button.g0{box-shadow:-5px 0 0 -2px #fff,-6px 0 0 -2px #d9d0f2}
+#pick .avs button{aspect-ratio:1;border-radius:14px;border:3px solid transparent;background:#f4f0ff;font-size:28px;cursor:pointer;padding:2px;display:flex;align-items:center;justify-content:center}
+#pick .avs button.on{border-color:#7a5cff;background:#e6dcff}
+#pick .avs button .av{width:100%;height:100%;background:transparent}
+#pick .pk.wide{width:min(760px,94vw)}
+#pick .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#pick .ok{font:inherit;font-weight:800;padding:10px 22px;border-radius:999px;border:0;background:#2dcc70;color:#10261a;cursor:pointer;font-size:16px}
+#pick .del{font:inherit;font-weight:700;padding:8px 14px;border-radius:999px;border:0;background:#ffe1e1;color:#a01919;cursor:pointer;margin-left:auto}
+#pick .warn{background:#e53935;color:#fff}
+</style>
+</head>
+<body>
+<div id="home">
+ <header><img class="logo-img" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMzAwIDYwMCIgd2lkdGg9IjEzMDAiIGhlaWdodD0iNjAwIj48dGl0bGU+UGxheXRpbWU2MTM8L3RpdGxlPjxwYXRoIGQ9Ik0xMTAuMCw2Mi41IEgxMTkwLjAgUTEyNjAsNjIuNSAxMjYwLDEzMi41IFYyNDcuNSBBNjUuMCw2NS4wIDAgMCAwIDEyNjAsMzc3LjUgVjQ5Mi41IFExMjYwLDU2Mi41IDExOTAuMCw1NjIuNSBIMTEwLjAgUTQwLDU2Mi41IDQwLDQ5Mi41IFYzNzcuNSBBNjUuMCw2NS4wIDAgMCAwIDQwLDI0Ny41IFYxMzIuNSBRNDAsNjIuNSAxMTAuMCw2Mi41IFoiIGZpbGw9IiNDOTZBMDAiLz48cGF0aCBkPSJNMTEwLjAsNDAgSDExOTAuMCBRMTI2MCw0MCAxMjYwLDExMC4wIFYyMjUuMCBBNjUuMCw2NS4wIDAgMCAwIDEyNjAsMzU1LjAgVjQ3MC4wIFExMjYwLDU0MCAxMTkwLjAsNTQwIEgxMTAuMCBRNDAsNTQwIDQwLDQ3MC4wIFYzNTUuMCBBNjUuMCw2NS4wIDAgMCAwIDQwLDIyNS4wIFYxMTAuMCBRNDAsNDAgMTEwLjAsNDAgWiIgZmlsbD0iI0ZGQzYyOSIvPjxwYXRoIGQ9Ik0xMTkuNSw3Ny41IEgxMTgwLjUgUTEyMjIuNSw3Ny41IDEyMjIuNSwxMTkuNSBWMjQxLjI1IEE0OC43NSw0OC43NSAwIDAgMCAxMjIyLjUsMzM4Ljc1IFY0NjAuNSBRMTIyMi41LDUwMi41IDExODAuNSw1MDIuNSBIMTE5LjUgUTc3LjUsNTAyLjUgNzcuNSw0NjAuNSBWMzM4Ljc1IEE0OC43NSw0OC43NSAwIDAgMCA3Ny41LDI0MS4yNSBWMTE5LjUgUTc3LjUsNzcuNSAxMTkuNSw3Ny41IFoiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0ZGN0ExQSIgc3Ryb2tlLXdpZHRoPSIxMS4wIiBzdHJva2UtZGFzaGFycmF5PSIyNS4wIDE3LjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxsaW5lIHgxPSIyODAiIHkxPSIxMTAiIHgyPSIyODAiIHkyPSI0NzAiIHN0cm9rZT0iI0ZGN0ExQSIgc3Ryb2tlLXdpZHRoPSIxMCIgc3Ryb2tlLWRhc2hhcnJheT0iMiAyMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PGxpbmUgeDE9IjEwMjAiIHkxPSIxMTAiIHgyPSIxMDIwIiB5Mj0iNDcwIiBzdHJva2U9IiNGRjdBMUEiIHN0cm9rZS13aWR0aD0iMTAiIHN0cm9rZS1kYXNoYXJyYXk9IjIgMjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxwb2x5Z29uIHBvaW50cz0iMTIzLjgsMjM1LjAgMTIzLjgsMzQ1LjAgMjIyLjgsMjkwLjAiIGZpbGw9IiNGRjRENUUiIHN0cm9rZT0iI0ZGNEQ1RSIgc3Ryb2tlLXdpZHRoPSIxOS44IiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHBvbHlnb24gcG9pbnRzPSIxMTc2LjIsMjM1LjAgMTE3Ni4yLDM0NS4wIDEwNzcuMiwyOTAuMCIgZmlsbD0iI0ZGNEQ1RSIgc3Ryb2tlPSIjRkY0RDVFIiBzdHJva2Utd2lkdGg9IjE5LjgiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMzE4Ljc1OTk5OTk5OTk5OTkzIDIzMC4yOFEzMDYuMDE5OTk5OTk5OTk5OSAyMzAuMjggMzA2LjAxOTk5OTk5OTk5OTkgMjI3LjQ4VjEzNi43NlEzMDYuMDE5OTk5OTk5OTk5OSAxMzIuMCAzMTAuMzU5OTk5OTk5OTk5OSAxMzIuMEgzMzQuOTk5OTk5OTk5OTk5OTRRMzU1LjcxOTk5OTk5OTk5OTkgMTMyLjAgMzY0Ljg4OTk5OTk5OTk5OTkzIDE0MC41NFEzNzQuMDU5OTk5OTk5OTk5OTUgMTQ5LjA3OTk5OTk5OTk5OTk4IDM3NC4wNTk5OTk5OTk5OTk5NSAxNjUuMzJRMzc0LjA1OTk5OTk5OTk5OTk1IDE3OC43NiAzNjUuMzc5OTk5OTk5OTk5OTQgMTg5Ljk1OTk5OTk5OTk5OTk4UTM2MS4wMzk5OTk5OTk5OTk5NiAxOTUuNTYgMzUyLjY0IDE5OC45MjAwMDAwMDAwMDAwMlEzNDQuMjM5OTk5OTk5OTk5OTUgMjAyLjI4IDMzMy4wMzk5OTk5OTk5OTk5IDIwMi4yOFYyMjcuMzRRMzMzLjAzOTk5OTk5OTk5OTkgMjI5LjAyIDMyNy43ODk5OTk5OTk5OTk5IDIyOS42NVEzMjIuNTM5OTk5OTk5OTk5OSAyMzAuMjggMzE4Ljc1OTk5OTk5OTk5OTkzIDIzMC4yOFpNMzMzLjAzOTk5OTk5OTk5OTkgMTU2LjM2VjE3OC40OEgzMzQuODU5OTk5OTk5OTk5OVEzMzkuNzU5OTk5OTk5OTk5OTMgMTc4LjQ4IDM0My4xMTk5OTk5OTk5OTk5IDE3NS4zOTk5OTk5OTk5OTk5OFEzNDYuNDc5OTk5OTk5OTk5OSAxNzIuMzIgMzQ2LjQ3OTk5OTk5OTk5OTkgMTY2LjcyUTM0Ni40Nzk5OTk5OTk5OTk5IDE2MS4xMiAzNDQuMTY5OTk5OTk5OTk5OSAxNTguNzRRMzQxLjg1OTk5OTk5OTk5OTkgMTU2LjM2IDMzNS45Nzk5OTk5OTk5OTk5IDE1Ni4zNlogTTM5Mi45Nzk5OTk5OTk5OTk5NiAyMjEuNzRWMTM0LjY2UTM5Mi45Nzk5OTk5OTk5OTk5NiAxMzEuNzE5OTk5OTk5OTk5OTcgNDA3LjE4OTk5OTk5OTk5OTk0IDEzMS43MTk5OTk5OTk5OTk5N1E0MjEuMzk5OTk5OTk5OTk5OSAxMzEuNzE5OTk5OTk5OTk5OTcgNDIxLjM5OTk5OTk5OTk5OTkgMTM0LjY2VjIwMy4yNkg0NDIuOTU5OTk5OTk5OTk5OVE0NDUuNDc5OTk5OTk5OTk5OTYgMjAzLjI2IDQ0Ni40NTk5OTk5OTk5OTk5IDIwOS44NFE0NDYuODc5OTk5OTk5OTk5OTQgMjEzLjA2IDQ0Ni44Nzk5OTk5OTk5OTk5NCAyMTYuNDIwMDAwMDAwMDAwMDJRNDQ2Ljg3OTk5OTk5OTk5OTk0IDIxOS43OCA0NDYuNDU5OTk5OTk5OTk5OSAyMjMuMjhRNDQ1LjMzOTk5OTk5OTk5OTkgMjMwLjAgNDQyLjgxOTk5OTk5OTk5OTk0IDIzMC4wSDM5OS42OTk5OTk5OTk5OTk5M1EzOTYuNjE5OTk5OTk5OTk5OTUgMjMwLjAgMzk0Ljc5OTk5OTk5OTk5OTk1IDIyNy40ODAwMDAwMDAwMDAwMlEzOTIuOTc5OTk5OTk5OTk5OTYgMjI0Ljk2IDM5Mi45Nzk5OTk5OTk5OTk5NiAyMjEuNzRaIE01MjkuMDc5OTk5OTk5OTk5OSAyMzAuMjhRNTE2LjkgMjMwLjI4IDUxNS45MiAyMjYuMzZMNTExLjI5OTk5OTk5OTk5OTk1IDIwOC4zSDQ4OS4wMzk5OTk5OTk5OTk5Nkw0ODQuOTc5OTk5OTk5OTk5OTYgMjI1LjY2UTQ4NC4xNCAyMzAuMCA0NzEuNTM5OTk5OTk5OTk5OTYgMjMwLjBRNDY0LjgyIDIzMC4wIDQ2MS42IDIyOS4yMzAwMDAwMDAwMDAwMlE0NTguMzggMjI4LjQ2IDQ1OC4zOCAyMjguMDRMNDgzLjE1OTk5OTk5OTk5OTk3IDEzMy4yNlE0ODMuMTU5OTk5OTk5OTk5OTcgMTMyLjE0IDUwMi4zNCAxMzIuMTRRNTIxLjUyIDEzMi4xNCA1MjEuNTIgMTMzLjI2TDU0NS43NCAyMjguMThRNTQ1Ljc0IDIyOS4xNiA1MzkuMyAyMjkuNzJRNTMyLjg2IDIzMC4yOCA1MjkuMDc5OTk5OTk5OTk5OSAyMzAuMjhaTTQ5Mi41Mzk5OTk5OTk5OTk5NiAxOTAuNTE5OTk5OTk5OTk5OThINTA3LjI0TDUwMC45NCAxNjEuNTRINTAwLjA5OTk5OTk5OTk5OTk3WiBNNjExLjcgMTM2LjYyUTYxMy41MiAxMzEuNzE5OTk5OTk5OTk5OTcgNjI5LjYyIDEzMS43MTk5OTk5OTk5OTk5N1E2MzMuNjgwMDAwMDAwMDAwMSAxMzEuNzE5OTk5OTk5OTk5OTcgNjM5LjIxIDEzMi4yNzk5OTk5OTk5OTk5N1E2NDQuNzQgMTMyLjgzOTk5OTk5OTk5OTk3IDY0NC4zMiAxMzMuNjhMNjE1LjIgMTkyLjJWMjI2LjM2UTYxNS4yIDIyOC43NCA2MDcuNSAyMjkuNzJRNjAzLjU4IDIzMC4yOCA1OTkuOCAyMzAuMjhRNTk2LjAyIDIzMC4yOCA1OTIuMjQgMjI5Ljg2UTU4NC41NCAyMjguODggNTg0LjU0IDIyNi4zNlYxOTMuMDRMNTU0LjQ0IDEzMy45NTk5OTk5OTk5OTk5OFE1NTMuODggMTMzLjEyIDU2MC4xODAwMDAwMDAwMDAxIDEzMi4zNVE1NjYuNDggMTMxLjU3OTk5OTk5OTk5OTk4IDU3MC44MiAxMzEuNTc5OTk5OTk5OTk5OThRNTg4LjA0IDEzMS41Nzk5OTk5OTk5OTk5OCA1ODkuNzIgMTM2LjYyTDU5OS45NCAxNjUuMThaIE02OTkuMjIgMjI3Ljc2UTY5OS4yMiAyMzAuNTYgNjg1LjM2IDIzMC41NlE2NzEuNSAyMzAuNTYgNjcxLjUgMjI3Ljc2VjE1Ny40OEg2NTQuN1E2NTIuMzIgMTU3LjQ4IDY1MS4zNCAxNTEuMDRRNjUwLjkyMDAwMDAwMDAwMDEgMTQ3Ljk1OTk5OTk5OTk5OTk4IDY1MC45MjAwMDAwMDAwMDAxIDE0NC43Mzk5OTk5OTk5OTk5OFE2NTAuOTIwMDAwMDAwMDAwMSAxNDEuNTE5OTk5OTk5OTk5OTggNjUxLjM0IDEzOC40NFE2NTIuMzIgMTMyLjAgNjU0LjcgMTMyLjBINzE1LjZRNzE3Ljk4IDEzMi4wIDcxOC45NiAxMzguNDRRNzE5LjM4MDAwMDAwMDAwMDEgMTQxLjUxOTk5OTk5OTk5OTk4IDcxOS4zODAwMDAwMDAwMDAxIDE0NC43Mzk5OTk5OTk5OTk5OFE3MTkuMzgwMDAwMDAwMDAwMSAxNDcuOTU5OTk5OTk5OTk5OTggNzE4Ljk2IDE1MS4wNFE3MTcuOTggMTU3LjQ4IDcxNS42IDE1Ny40OEg2OTkuMjJaIE03NDQuNiAyMDUuOTJWMTU2LjA3OTk5OTk5OTk5OTk4SDczNC42NlE3MzIuMjggMTU2LjA3OTk5OTk5OTk5OTk4IDczMS4zMDAwMDAwMDAwMDAxIDE1MC4wNlE3MzAuODggMTQ3LjEyIDczMC44OCAxNDQuMDRRNzMwLjg4IDE0MC45NTk5OTk5OTk5OTk5OCA3MzEuMzAwMDAwMDAwMDAwMSAxMzguMDE5OTk5OTk5OTk5OThRNzMyLjI4IDEzMi4wIDczNC42NiAxMzIuMEg3ODEuN1E3ODQuMDggMTMyLjAgNzg0LjkyMDAwMDAwMDAwMDEgMTM4LjAxOTk5OTk5OTk5OTk4UTc4NS40OCAxNDAuOTU5OTk5OTk5OTk5OTggNzg1LjQ4IDE0NC4wNFE3ODUuNDggMTQ3LjEyIDc4NC45MjAwMDAwMDAwMDAxIDE1MC4wNlE3ODQuMDggMTU2LjA3OTk5OTk5OTk5OTk4IDc4MS43IDE1Ni4wNzk5OTk5OTk5OTk5OEg3NzIuMzJWMjA1LjkySDc4Mi4xMlE3ODQuNSAyMDUuOTIgNzg1LjQ4IDIxMS45NFE3ODYuMDQgMjE0Ljg4IDc4Ni4wNCAyMTcuOTU5OTk5OTk5OTk5OThRNzg2LjA0IDIyMS4wNCA3ODUuNDggMjIzLjk4UTc4NC41IDIzMC4wIDc4Mi4xMiAyMzAuMEg3MzQuOTRRNzMyLjU2MDAwMDAwMDAwMDEgMjMwLjAgNzMxLjcyIDIyMy45OFE3MzEuMTYgMjIxLjA0IDczMS4xNiAyMTcuOTU5OTk5OTk5OTk5OThRNzMxLjE2IDIxNC44OCA3MzEuNzIgMjExLjk0UTczMi41NjAwMDAwMDAwMDAxIDIwNS45MiA3MzQuOTQgMjA1LjkyWiBNOTAxLjQyMDAwMDAwMDAwMDEgMjMwLjE0UTg4OC45NiAyMzAuMTQgODg4Ljk2IDIyNy4zNEw4ODYuMDIwMDAwMDAwMDAwMSAxNzEuMkw4NjguOTQgMjI4LjA0UTg2OC4zODAwMDAwMDAwMDAxIDIyOS43MiA4NTkuNDIwMDAwMDAwMDAwMSAyMjkuNzJRODUwLjQ2IDIyOS43MiA4NTAuMTgwMDAwMDAwMDAwMSAyMjguMThMODMyLjU0MDAwMDAwMDAwMDEgMTcwLjY0TDgzMC41OCAyMjYuNVE4MzAuNDQgMjI4LjYgODI1LjI2IDIyOS4zN1E4MjAuMDggMjMwLjE0IDgxNi42NTAwMDAwMDAwMDAxIDIzMC4xNFE4MTMuMjIgMjMwLjE0IDgxMC4wMDAwMDAwMDAwMDAxIDIyOS43MlE4MDMuMjgwMDAwMDAwMDAwMSAyMjguNzQgODAzLjQyMDAwMDAwMDAwMDEgMjI2LjIyTDgwNi42NDAwMDAwMDAwMDAxIDEzNS4yMTk5OTk5OTk5OTk5N1E4MDYuNjQwMDAwMDAwMDAwMSAxMzEuODU5OTk5OTk5OTk5OTkgODIzLjcyIDEzMS44NTk5OTk5OTk5OTk5OVE4MjguNzYwMDAwMDAwMDAwMSAxMzEuODU5OTk5OTk5OTk5OTkgODM2LjA0MDAwMDAwMDAwMDEgMTMyLjYzUTg0My4zMiAxMzMuMzk5OTk5OTk5OTk5OTggODQ0LjE2MDAwMDAwMDAwMDEgMTM1LjY0TDg1OS44NCAxNzkuNzRMODczLjU2MDAwMDAwMDAwMDEgMTM1LjVRODc0LjgyIDEzMS44NTk5OTk5OTk5OTk5OSA4OTIuODgwMDAwMDAwMDAwMSAxMzEuODU5OTk5OTk5OTk5OTlRODk4LjA2MDAwMDAwMDAwMDEgMTMxLjg1OTk5OTk5OTk5OTk5IDkwNS4yNzAwMDAwMDAwMDAxIDEzMi42M1E5MTIuNDgwMDAwMDAwMDAwMSAxMzMuMzk5OTk5OTk5OTk5OTggOTEyLjQ4MDAwMDAwMDAwMDEgMTM1LjM1OTk5OTk5OTk5OTk5TDkxNi41NDAwMDAwMDAwMDAxIDIyNy4yUTkxNi41NDAwMDAwMDAwMDAxIDIyOC43NCA5MTEuMDgwMDAwMDAwMDAwMiAyMjkuNDRROTA1LjYyMDAwMDAwMDAwMDEgMjMwLjE0IDkwMS40MjAwMDAwMDAwMDAxIDIzMC4xNFogTTk4My45MDAwMDAwMDAwMDAxIDE3MC45MlE5ODYuNTYwMDAwMDAwMDAwMSAxNzAuOTIgOTg2LjU2MDAwMDAwMDAwMDEgMTgwLjcyUTk4Ni41NjAwMDAwMDAwMDAxIDE4My42NiA5ODUuOTMwMDAwMDAwMDAwMSAxODcuNjQ5OTk5OTk5OTk5OThROTg1LjMwMDAwMDAwMDAwMDEgMTkxLjY0IDk4My42MjAwMDAwMDAwMDAxIDE5MS42NEg5NjUuODQwMDAwMDAwMDAwMVYyMDUuNjRIOTkxLjYwMDAwMDAwMDAwMDFROTkzLjk4MDAwMDAwMDAwMDEgMjA1LjY0IDk5NC44MiAyMTEuOFE5OTUuMjQwMDAwMDAwMDAwMSAyMTQuNDYgOTk1LjI0MDAwMDAwMDAwMDEgMjE3LjQ3UTk5NS4yNDAwMDAwMDAwMDAxIDIyMC40OCA5OTQuNDAwMDAwMDAwMDAwMSAyMjUuMjRROTkzLjU2MDAwMDAwMDAwMDEgMjMwLjAgOTkxLjYwMDAwMDAwMDAwMDEgMjMwLjBIOTQzLjcyMDAwMDAwMDAwMDFROTM4LjQwMDAwMDAwMDAwMDEgMjMwLjAgOTM4LjQwMDAwMDAwMDAwMDEgMjI1LjY2VjEzNS42NFE5MzguNDAwMDAwMDAwMDAwMSAxMzIuMCA5NDEuNjIwMDAwMDAwMDAwMSAxMzIuMEg5OTEuNzQwMDAwMDAwMDAwMVE5OTQuNjgwMDAwMDAwMDAwMSAxMzIuMCA5OTQuNjgwMDAwMDAwMDAwMSAxNDQuMzlROTk0LjY4MDAwMDAwMDAwMDEgMTU2Ljc3OTk5OTk5OTk5OTk3IDk5MS43NDAwMDAwMDAwMDAxIDE1Ni43Nzk5OTk5OTk5OTk5N0g5NjUuODQwMDAwMDAwMDAwMVYxNzAuOTJaIiBmaWxsPSIjMTcyMDRBIi8+PHBhdGggZD0iTTU5MC42ODAwMDAwMDAwMDAxIDM2Ni41MjVRNTk0LjU1IDM3OC4xMzUgNTk0LjU1IDM5MC4xNzVRNTk0LjU1IDQwMi4yMTUwMDAwMDAwMDAwMyA1OTMuNTgyNSA0MDguMzQyNTAwMDAwMDAwMDNRNTkyLjYxNSA0MTQuNDcgNTg4Ljg1MjUgNDIxLjk5NVE1ODUuMDkgNDI5LjUyIDU3OC43NDc1IDQzNC42Nzk5OTk5OTk5OTk5NVE1NzIuNDA1IDQzOS44NCA1NjAuNjg3NSA0NDMuMzg3NVE1NDguOTcgNDQ2LjkzNSA1MzMuMjc1IDQ0Ni45MzVRNDk5LjUyMDAwMDAwMDAwMDA0IDQ0Ni45MzUgNDgyLjMyMDAwMDAwMDAwMDA1IDQyOC4zMzc1UTQ2NS4xMiA0MDkuNzQgNDY1LjEyIDM2OC4xMzc1UTQ2NS4xMiAzMjYuNTM0OTk5OTk5OTk5OTcgNDgxLjI0NSAzMDguMTUyNVE0OTcuMzcgMjg5Ljc3IDUzMC4yNjUgMjg5Ljc3UTU1Mi44NCAyODkuNzcgNTY5LjUwMjUgMjkzLjEwMjQ5OTk5OTk5OTk2UTU4Ni4xNjUgMjk2LjQzNSA1ODYuMTY1IDMwMC45NVE1ODYuMTY1IDMwNi41Mzk5OTk5OTk5OTk5NiA1ODEuOTcyNSAzMjAuNTE1UTU3Ny43OCAzMzQuNDkgNTc0LjM0IDMzNC40OVE1NzMuMjY1IDMzNC40OSA1NjcuODkgMzMzLjQxNVE1NTMuMjcgMzMwLjQwNSA1NDEuMjMgMzMwLjQwNVE1MjkuMTkgMzMwLjQwNSA1MjUuNzUgMzM2LjMxNzVRNTIyLjMxMDAwMDAwMDAwMDEgMzQyLjIzIDUyMi4zMTAwMDAwMDAwMDAxIDM1My42MjVRNTIzLjE3MDAwMDAwMDAwMDEgMzUyLjU1IDUyNS4xMDUgMzUwLjkzNzVRNTI3LjA0IDM0OS4zMjUgNTM1LjQyNSAzNDYuNTNRNTQzLjgxMDAwMDAwMDAwMDEgMzQzLjczNSA1NTQuNDUyNTAwMDAwMDAwMSAzNDMuNzM1UTU2NS4wOTUgMzQzLjczNSA1NzIuNTEyNSAzNDYuODUyNVE1NzkuOTMwMDAwMDAwMDAwMSAzNDkuOTcgNTg0LjEyMjUwMDAwMDAwMDEgMzU0LjcwMDAwMDAwMDAwMDA1UTU4OC4zMTUgMzU5LjQzIDU5MC42ODAwMDAwMDAwMDAxIDM2Ni41MjVaTTUyOS44MzUgMzcwLjM5NVE1MjMuNiAzNzAuMzk1IDUyMy42IDM5My41MDc1UTUyMy42IDQxNi42MiA1MjkuODM1IDQxNi42MlE1MzYuNSA0MTYuNjIgNTM2LjUgMzkzLjUwNzVRNTM2LjUgMzcwLjM5NSA1MjkuODM1IDM3MC4zOTVaIE02MzUuODEgNDM5Ljg0VjM0Ni45NjAwMDAwMDAwMDAwNEg2MTMuODhRNjEwLjIyNSAzNDYuOTYwMDAwMDAwMDAwMDQgNjEwLjIyNSAzMzEuMjY1UTYxMC4yMjUgMzE1LjU3IDYxMy44OCAzMDIuODg1UTYxNC45NTUgMjk4LjggNjM2LjY3MDAwMDAwMDAwMDEgMjk1LjM2UTY1OC4zODUgMjkxLjkyIDY2OS45OTUgMjkxLjkyUTY4MS42MDUgMjkxLjkyIDY4NS40NzUgMjkyLjc4UTY4OS4zNDUgMjkzLjY0IDY5MS4yOCAyOTQuODIyNVE2OTMuMjE1IDI5Ni4wMDUgNjk0LjI5IDI5Ny41MVE2OTUuNzk1IDI5OS44NzUgNjk1Ljc5NSAzMDIuMDI1VjQzOS44NFE2OTUuNzk1IDQ0Mi4yMDUgNjgyLjY4MDAwMDAwMDAwMDEgNDQzLjYwMjQ5OTk5OTk5OTk2UTY2OS41NjUgNDQ1LjAgNjU2LjQ1IDQ0NS4wUTY0My4zMzUgNDQ1LjAgNjM5LjU3MjUgNDQzLjgxNzVRNjM1LjgxIDQ0Mi42MzUgNjM1LjgxIDQzOS44NFogTTgzMi45NDQ5OTk5OTk5OTk5IDMzMC4xOVE4MzIuOTQ0OTk5OTk5OTk5OSAzNTEuOTA1IDgxNS43NDUgMzYyLjY1NVE4MTguMTEgMzYzLjczIDgyMS44NzI1IDM2Ny44MTVRODI1LjYzNSAzNzEuOSA4MjguMjE0OTk5OTk5OTk5OSAzNzUuOTg1UTgzNC44OCAzODYuNTIgODM0Ljg4IDQwMC45MjVRODM0Ljg4IDQyNC41NzUgODE3Ljg5NSA0MzUuNzU1UTgwMC45MSA0NDYuOTM1IDc3MS4yNCA0NDYuOTM1UTc1Ni42MiA0NDYuOTM1IDc0My42MTI1IDQ0NC40NjI1UTczMC42MDUgNDQxLjk5IDcyMy43MjUgNDM4Ljg3MjVRNzE2Ljg0NSA0MzUuNzU1IDcxNi44NDUgNDMzLjE3NVE3MTYuODQ1IDQyMS4zNSA3MTkuNDI1IDQxMi4zMjAwMDAwMDAwMDAwNVE3MjIuMDA1IDQwMy4yOSA3MjUuMjMgMzk5LjUyNzUwMDAwMDAwMDAzUTcyOC40NTQ5OTk5OTk5OTk5IDM5NS43NjUgNzMxLjQ2NSAzOTUuNzY1UTczMi4zMjQ5OTk5OTk5OTk5IDM5NS43NjUgNzQyLjg1OTk5OTk5OTk5OTkgMzk5LjYzNVE3NTMuMzk1IDQwMy41MDUgNzYzLjYwNzUgNDAzLjUwNVE3NzMuODE5OTk5OTk5OTk5OSA0MDMuNTA1IDc3My44MTk5OTk5OTk5OTk5IDM5Ny4wNTVRNzczLjgxOTk5OTk5OTk5OTkgMzg4LjI0IDc1Mi4xMDUgMzg3LjU5NVE3NDMuNTA1IDM4Ny4zOCA3NDIuNjQ1IDM4Ny4xNjVRNzM4LjEzIDM4NS42NiA3MzguMTMgMzY4LjI0NVE3MzguMTMgMzUwLjgzIDc0Mi42NDUgMzQ5LjExUTc0My41MDUgMzQ4LjY4IDc1Mi4xMDUgMzQ4LjY4UTc3My44MTk5OTk5OTk5OTk5IDM0OC4yNSA3NzMuODE5OTk5OTk5OTk5OSAzMzkuODY1UTc3My44MTk5OTk5OTk5OTk5IDMzMy40MTUgNzY0LjQ2NzUgMzMzLjQxNVE3NTUuMTE1IDMzMy40MTUgNzQzLjcyIDMzNy45M1E3MzIuMzI0OTk5OTk5OTk5OSAzNDIuNDQ1IDczMS4yNSAzNDIuNDQ1UTcyNi4zMDUgMzQyLjQ0NSA3MjIuMjIgMzI4LjAzOTk5OTk5OTk5OTk2UTcxOC4xMzUgMzEzLjYzNSA3MTguMTM1IDMwNy42MTVRNzE4LjEzNSAzMDIuMDI1IDczMC42MDUgMjk2LjIyUTc0NC4zNjUgMjg5Ljk4NSA3NzEuMDI1IDI4OS45ODVRODMyLjk0NDk5OTk5OTk5OTkgMjg5Ljk4NSA4MzIuOTQ0OTk5OTk5OTk5OSAzMzAuMTlaIiBmaWxsPSIjMTcyMDRBIiBzdHJva2U9IiMxNzIwNEEiIHN0cm9rZS13aWR0aD0iMzAiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMTApIi8+PHBhdGggZD0iTTU5MC42ODAwMDAwMDAwMDAxIDM2Ni41MjVRNTk0LjU1IDM3OC4xMzUgNTk0LjU1IDM5MC4xNzVRNTk0LjU1IDQwMi4yMTUwMDAwMDAwMDAwMyA1OTMuNTgyNSA0MDguMzQyNTAwMDAwMDAwMDNRNTkyLjYxNSA0MTQuNDcgNTg4Ljg1MjUgNDIxLjk5NVE1ODUuMDkgNDI5LjUyIDU3OC43NDc1IDQzNC42Nzk5OTk5OTk5OTk5NVE1NzIuNDA1IDQzOS44NCA1NjAuNjg3NSA0NDMuMzg3NVE1NDguOTcgNDQ2LjkzNSA1MzMuMjc1IDQ0Ni45MzVRNDk5LjUyMDAwMDAwMDAwMDA0IDQ0Ni45MzUgNDgyLjMyMDAwMDAwMDAwMDA1IDQyOC4zMzc1UTQ2NS4xMiA0MDkuNzQgNDY1LjEyIDM2OC4xMzc1UTQ2NS4xMiAzMjYuNTM0OTk5OTk5OTk5OTcgNDgxLjI0NSAzMDguMTUyNVE0OTcuMzcgMjg5Ljc3IDUzMC4yNjUgMjg5Ljc3UTU1Mi44NCAyODkuNzcgNTY5LjUwMjUgMjkzLjEwMjQ5OTk5OTk5OTk2UTU4Ni4xNjUgMjk2LjQzNSA1ODYuMTY1IDMwMC45NVE1ODYuMTY1IDMwNi41Mzk5OTk5OTk5OTk5NiA1ODEuOTcyNSAzMjAuNTE1UTU3Ny43OCAzMzQuNDkgNTc0LjM0IDMzNC40OVE1NzMuMjY1IDMzNC40OSA1NjcuODkgMzMzLjQxNVE1NTMuMjcgMzMwLjQwNSA1NDEuMjMgMzMwLjQwNVE1MjkuMTkgMzMwLjQwNSA1MjUuNzUgMzM2LjMxNzVRNTIyLjMxMDAwMDAwMDAwMDEgMzQyLjIzIDUyMi4zMTAwMDAwMDAwMDAxIDM1My42MjVRNTIzLjE3MDAwMDAwMDAwMDEgMzUyLjU1IDUyNS4xMDUgMzUwLjkzNzVRNTI3LjA0IDM0OS4zMjUgNTM1LjQyNSAzNDYuNTNRNTQzLjgxMDAwMDAwMDAwMDEgMzQzLjczNSA1NTQuNDUyNTAwMDAwMDAwMSAzNDMuNzM1UTU2NS4wOTUgMzQzLjczNSA1NzIuNTEyNSAzNDYuODUyNVE1NzkuOTMwMDAwMDAwMDAwMSAzNDkuOTcgNTg0LjEyMjUwMDAwMDAwMDEgMzU0LjcwMDAwMDAwMDAwMDA1UTU4OC4zMTUgMzU5LjQzIDU5MC42ODAwMDAwMDAwMDAxIDM2Ni41MjVaTTUyOS44MzUgMzcwLjM5NVE1MjMuNiAzNzAuMzk1IDUyMy42IDM5My41MDc1UTUyMy42IDQxNi42MiA1MjkuODM1IDQxNi42MlE1MzYuNSA0MTYuNjIgNTM2LjUgMzkzLjUwNzVRNTM2LjUgMzcwLjM5NSA1MjkuODM1IDM3MC4zOTVaIE02MzUuODEgNDM5Ljg0VjM0Ni45NjAwMDAwMDAwMDAwNEg2MTMuODhRNjEwLjIyNSAzNDYuOTYwMDAwMDAwMDAwMDQgNjEwLjIyNSAzMzEuMjY1UTYxMC4yMjUgMzE1LjU3IDYxMy44OCAzMDIuODg1UTYxNC45NTUgMjk4LjggNjM2LjY3MDAwMDAwMDAwMDEgMjk1LjM2UTY1OC4zODUgMjkxLjkyIDY2OS45OTUgMjkxLjkyUTY4MS42MDUgMjkxLjkyIDY4NS40NzUgMjkyLjc4UTY4OS4zNDUgMjkzLjY0IDY5MS4yOCAyOTQuODIyNVE2OTMuMjE1IDI5Ni4wMDUgNjk0LjI5IDI5Ny41MVE2OTUuNzk1IDI5OS44NzUgNjk1Ljc5NSAzMDIuMDI1VjQzOS44NFE2OTUuNzk1IDQ0Mi4yMDUgNjgyLjY4MDAwMDAwMDAwMDEgNDQzLjYwMjQ5OTk5OTk5OTk2UTY2OS41NjUgNDQ1LjAgNjU2LjQ1IDQ0NS4wUTY0My4zMzUgNDQ1LjAgNjM5LjU3MjUgNDQzLjgxNzVRNjM1LjgxIDQ0Mi42MzUgNjM1LjgxIDQzOS44NFogTTgzMi45NDQ5OTk5OTk5OTk5IDMzMC4xOVE4MzIuOTQ0OTk5OTk5OTk5OSAzNTEuOTA1IDgxNS43NDUgMzYyLjY1NVE4MTguMTEgMzYzLjczIDgyMS44NzI1IDM2Ny44MTVRODI1LjYzNSAzNzEuOSA4MjguMjE0OTk5OTk5OTk5OSAzNzUuOTg1UTgzNC44OCAzODYuNTIgODM0Ljg4IDQwMC45MjVRODM0Ljg4IDQyNC41NzUgODE3Ljg5NSA0MzUuNzU1UTgwMC45MSA0NDYuOTM1IDc3MS4yNCA0NDYuOTM1UTc1Ni42MiA0NDYuOTM1IDc0My42MTI1IDQ0NC40NjI1UTczMC42MDUgNDQxLjk5IDcyMy43MjUgNDM4Ljg3MjVRNzE2Ljg0NSA0MzUuNzU1IDcxNi44NDUgNDMzLjE3NVE3MTYuODQ1IDQyMS4zNSA3MTkuNDI1IDQxMi4zMjAwMDAwMDAwMDAwNVE3MjIuMDA1IDQwMy4yOSA3MjUuMjMgMzk5LjUyNzUwMDAwMDAwMDAzUTcyOC40NTQ5OTk5OTk5OTk5IDM5NS43NjUgNzMxLjQ2NSAzOTUuNzY1UTczMi4zMjQ5OTk5OTk5OTk5IDM5NS43NjUgNzQyLjg1OTk5OTk5OTk5OTkgMzk5LjYzNVE3NTMuMzk1IDQwMy41MDUgNzYzLjYwNzUgNDAzLjUwNVE3NzMuODE5OTk5OTk5OTk5OSA0MDMuNTA1IDc3My44MTk5OTk5OTk5OTk5IDM5Ny4wNTVRNzczLjgxOTk5OTk5OTk5OTkgMzg4LjI0IDc1Mi4xMDUgMzg3LjU5NVE3NDMuNTA1IDM4Ny4zOCA3NDIuNjQ1IDM4Ny4xNjVRNzM4LjEzIDM4NS42NiA3MzguMTMgMzY4LjI0NVE3MzguMTMgMzUwLjgzIDc0Mi42NDUgMzQ5LjExUTc0My41MDUgMzQ4LjY4IDc1Mi4xMDUgMzQ4LjY4UTc3My44MTk5OTk5OTk5OTk5IDM0OC4yNSA3NzMuODE5OTk5OTk5OTk5OSAzMzkuODY1UTc3My44MTk5OTk5OTk5OTk5IDMzMy40MTUgNzY0LjQ2NzUgMzMzLjQxNVE3NTUuMTE1IDMzMy40MTUgNzQzLjcyIDMzNy45M1E3MzIuMzI0OTk5OTk5OTk5OSAzNDIuNDQ1IDczMS4yNSAzNDIuNDQ1UTcyNi4zMDUgMzQyLjQ0NSA3MjIuMjIgMzI4LjAzOTk5OTk5OTk5OTk2UTcxOC4xMzUgMzEzLjYzNSA3MTguMTM1IDMwNy42MTVRNzE4LjEzNSAzMDIuMDI1IDczMC42MDUgMjk2LjIyUTc0NC4zNjUgMjg5Ljk4NSA3NzEuMDI1IDI4OS45ODVRODMyLjk0NDk5OTk5OTk5OTkgMjg5Ljk4NSA4MzIuOTQ0OTk5OTk5OTk5OSAzMzAuMTlaIiBmaWxsPSIjMTcyMDRBIiBzdHJva2U9IiMxNzIwNEEiIHN0cm9rZS13aWR0aD0iMzAiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNNTkwLjY4MDAwMDAwMDAwMDEgMzY2LjUyNVE1OTQuNTUgMzc4LjEzNSA1OTQuNTUgMzkwLjE3NVE1OTQuNTUgNDAyLjIxNTAwMDAwMDAwMDAzIDU5My41ODI1IDQwOC4zNDI1MDAwMDAwMDAwM1E1OTIuNjE1IDQxNC40NyA1ODguODUyNSA0MjEuOTk1UTU4NS4wOSA0MjkuNTIgNTc4Ljc0NzUgNDM0LjY3OTk5OTk5OTk5OTk1UTU3Mi40MDUgNDM5Ljg0IDU2MC42ODc1IDQ0My4zODc1UTU0OC45NyA0NDYuOTM1IDUzMy4yNzUgNDQ2LjkzNVE0OTkuNTIwMDAwMDAwMDAwMDQgNDQ2LjkzNSA0ODIuMzIwMDAwMDAwMDAwMDUgNDI4LjMzNzVRNDY1LjEyIDQwOS43NCA0NjUuMTIgMzY4LjEzNzVRNDY1LjEyIDMyNi41MzQ5OTk5OTk5OTk5NyA0ODEuMjQ1IDMwOC4xNTI1UTQ5Ny4zNyAyODkuNzcgNTMwLjI2NSAyODkuNzdRNTUyLjg0IDI4OS43NyA1NjkuNTAyNSAyOTMuMTAyNDk5OTk5OTk5OTZRNTg2LjE2NSAyOTYuNDM1IDU4Ni4xNjUgMzAwLjk1UTU4Ni4xNjUgMzA2LjUzOTk5OTk5OTk5OTk2IDU4MS45NzI1IDMyMC41MTVRNTc3Ljc4IDMzNC40OSA1NzQuMzQgMzM0LjQ5UTU3My4yNjUgMzM0LjQ5IDU2Ny44OSAzMzMuNDE1UTU1My4yNyAzMzAuNDA1IDU0MS4yMyAzMzAuNDA1UTUyOS4xOSAzMzAuNDA1IDUyNS43NSAzMzYuMzE3NVE1MjIuMzEwMDAwMDAwMDAwMSAzNDIuMjMgNTIyLjMxMDAwMDAwMDAwMDEgMzUzLjYyNVE1MjMuMTcwMDAwMDAwMDAwMSAzNTIuNTUgNTI1LjEwNSAzNTAuOTM3NVE1MjcuMDQgMzQ5LjMyNSA1MzUuNDI1IDM0Ni41M1E1NDMuODEwMDAwMDAwMDAwMSAzNDMuNzM1IDU1NC40NTI1MDAwMDAwMDAxIDM0My43MzVRNTY1LjA5NSAzNDMuNzM1IDU3Mi41MTI1IDM0Ni44NTI1UTU3OS45MzAwMDAwMDAwMDAxIDM0OS45NyA1ODQuMTIyNTAwMDAwMDAwMSAzNTQuNzAwMDAwMDAwMDAwMDVRNTg4LjMxNSAzNTkuNDMgNTkwLjY4MDAwMDAwMDAwMDEgMzY2LjUyNVpNNTI5LjgzNSAzNzAuMzk1UTUyMy42IDM3MC4zOTUgNTIzLjYgMzkzLjUwNzVRNTIzLjYgNDE2LjYyIDUyOS44MzUgNDE2LjYyUTUzNi41IDQxNi42MiA1MzYuNSAzOTMuNTA3NVE1MzYuNSAzNzAuMzk1IDUyOS44MzUgMzcwLjM5NVogTTYzNS44MSA0MzkuODRWMzQ2Ljk2MDAwMDAwMDAwMDA0SDYxMy44OFE2MTAuMjI1IDM0Ni45NjAwMDAwMDAwMDAwNCA2MTAuMjI1IDMzMS4yNjVRNjEwLjIyNSAzMTUuNTcgNjEzLjg4IDMwMi44ODVRNjE0Ljk1NSAyOTguOCA2MzYuNjcwMDAwMDAwMDAwMSAyOTUuMzZRNjU4LjM4NSAyOTEuOTIgNjY5Ljk5NSAyOTEuOTJRNjgxLjYwNSAyOTEuOTIgNjg1LjQ3NSAyOTIuNzhRNjg5LjM0NSAyOTMuNjQgNjkxLjI4IDI5NC44MjI1UTY5My4yMTUgMjk2LjAwNSA2OTQuMjkgMjk3LjUxUTY5NS43OTUgMjk5Ljg3NSA2OTUuNzk1IDMwMi4wMjVWNDM5Ljg0UTY5NS43OTUgNDQyLjIwNSA2ODIuNjgwMDAwMDAwMDAwMSA0NDMuNjAyNDk5OTk5OTk5OTZRNjY5LjU2NSA0NDUuMCA2NTYuNDUgNDQ1LjBRNjQzLjMzNSA0NDUuMCA2MzkuNTcyNSA0NDMuODE3NVE2MzUuODEgNDQyLjYzNSA2MzUuODEgNDM5Ljg0WiBNODMyLjk0NDk5OTk5OTk5OTkgMzMwLjE5UTgzMi45NDQ5OTk5OTk5OTk5IDM1MS45MDUgODE1Ljc0NSAzNjIuNjU1UTgxOC4xMSAzNjMuNzMgODIxLjg3MjUgMzY3LjgxNVE4MjUuNjM1IDM3MS45IDgyOC4yMTQ5OTk5OTk5OTk5IDM3NS45ODVRODM0Ljg4IDM4Ni41MiA4MzQuODggNDAwLjkyNVE4MzQuODggNDI0LjU3NSA4MTcuODk1IDQzNS43NTVRODAwLjkxIDQ0Ni45MzUgNzcxLjI0IDQ0Ni45MzVRNzU2LjYyIDQ0Ni45MzUgNzQzLjYxMjUgNDQ0LjQ2MjVRNzMwLjYwNSA0NDEuOTkgNzIzLjcyNSA0MzguODcyNVE3MTYuODQ1IDQzNS43NTUgNzE2Ljg0NSA0MzMuMTc1UTcxNi44NDUgNDIxLjM1IDcxOS40MjUgNDEyLjMyMDAwMDAwMDAwMDA1UTcyMi4wMDUgNDAzLjI5IDcyNS4yMyAzOTkuNTI3NTAwMDAwMDAwMDNRNzI4LjQ1NDk5OTk5OTk5OTkgMzk1Ljc2NSA3MzEuNDY1IDM5NS43NjVRNzMyLjMyNDk5OTk5OTk5OTkgMzk1Ljc2NSA3NDIuODU5OTk5OTk5OTk5OSAzOTkuNjM1UTc1My4zOTUgNDAzLjUwNSA3NjMuNjA3NSA0MDMuNTA1UTc3My44MTk5OTk5OTk5OTk5IDQwMy41MDUgNzczLjgxOTk5OTk5OTk5OTkgMzk3LjA1NVE3NzMuODE5OTk5OTk5OTk5OSAzODguMjQgNzUyLjEwNSAzODcuNTk1UTc0My41MDUgMzg3LjM4IDc0Mi42NDUgMzg3LjE2NVE3MzguMTMgMzg1LjY2IDczOC4xMyAzNjguMjQ1UTczOC4xMyAzNTAuODMgNzQyLjY0NSAzNDkuMTFRNzQzLjUwNSAzNDguNjggNzUyLjEwNSAzNDguNjhRNzczLjgxOTk5OTk5OTk5OTkgMzQ4LjI1IDc3My44MTk5OTk5OTk5OTk5IDMzOS44NjVRNzczLjgxOTk5OTk5OTk5OTkgMzMzLjQxNSA3NjQuNDY3NSAzMzMuNDE1UTc1NS4xMTUgMzMzLjQxNSA3NDMuNzIgMzM3LjkzUTczMi4zMjQ5OTk5OTk5OTk5IDM0Mi40NDUgNzMxLjI1IDM0Mi40NDVRNzI2LjMwNSAzNDIuNDQ1IDcyMi4yMiAzMjguMDM5OTk5OTk5OTk5OTZRNzE4LjEzNSAzMTMuNjM1IDcxOC4xMzUgMzA3LjYxNVE3MTguMTM1IDMwMi4wMjUgNzMwLjYwNSAyOTYuMjJRNzQ0LjM2NSAyODkuOTg1IDc3MS4wMjUgMjg5Ljk4NVE4MzIuOTQ0OTk5OTk5OTk5OSAyODkuOTg1IDgzMi45NDQ5OTk5OTk5OTk5IDMzMC4xOVoiIGZpbGw9IiNGRjdBMUEiLz48L3N2Zz4=" alt="Playtime613">
+  <div class="who-chip" id="whoChip"><span class="av" id="chipAv"></span><span class="nm" id="chipName"></span><button id="bSwitch" title="Choose a different player">🔄 Switch player</button></div></header>
+ <div class="sub" id="homeSub">Pick a game and go! Your progress saves on this computer.</div>
+ <div class="grid" id="grid"></div>
+ <footer>
+  <button id="bBackup" title="Save all progress to a file">💾 Back up saves</button>
+  <button id="bRestore" title="Load progress from a backup file">📂 Restore saves</button>
+  <span class="ver" id="ver"></span>
+ </footer>
+</div>
+<div id="play">
+ <div id="bar"><button id="bHome">🏠 Home</button><div class="t" id="pTitle"></div><button class="ghost" id="bFull" title="Full screen (F11)">⛶ Full screen</button></div>
+ <div id="fw"><iframe id="frame" allow="autoplay; fullscreen; gamepad" allowfullscreen sandbox="allow-scripts allow-same-origin allow-modals allow-forms allow-pointer-lock allow-orientation-lock"></iframe></div>
+</div>
+<div id="who">
+ <h1>Who's playing?</h1>
+ <p class="hint">Tap your name. Everyone has their own progress in every game.</p>
+ <div class="pgrid" id="pgrid"></div>
+ <div class="wfoot">Tap ✏️ to change a name or picture.</div>
+</div>
+<div id="toast"></div>
+<script src="games/list.js"></script>
+<script src="/js/neutralino.js"></script>
+<script>window.PT613_APP_VERSION="1.0.6";</script>
+<script src="updater.js"></script>
+<script src="licence-config.js"></script>
+<script src="nacl-fast.min.js"></script>
+<script src="licence.js"></script>
+<script src="window-fit.js"></script>
+<script src="shabbos-times.js"></script>
+<script src="parent-controls.js"></script>
+<script>
+(function(){
+"use strict";
+if(window.PT613_UPD&&PT613_UPD.boot())return;   /* v1.0.5: open the newest downloaded copy */
+var APP_VERSION="1.0.6";
+var GAMES=window.PT613_GAMES||[], NL=(typeof Neutralino!=="undefined");
+var $=function(id){return document.getElementById(id);};
+var esc=function(t){return String(t).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});};
+$("ver").textContent="Playtime613 · version "+APP_VERSION;
+function toast(m,ms){var t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(toast.h);toast.h=setTimeout(function(){t.style.display="none";},ms||3000);}
+
+/* ---------- home screen ---------- */
+var grid=$("grid");
+GAMES.forEach(function(g){
+ var b=document.createElement("button"); b.className="tile"; b.setAttribute("data-id",g.id);
+ b.innerHTML='<div class="tw"><div class="thumb">'+esc(g.emoji||"🎮")+'<img alt="" src="games/'+esc(g.id)+'/thumb.jpg" onerror="this.remove()"></div>'+
+  '<div class="emo">'+esc(g.emoji||"🎮")+'</div></div><div class="meta"><h3>'+esc(g.title)+'</h3><p>'+esc(g.tagline||"")+'</p></div><div class="play">▶ Play</div>';
+ b.onclick=function(){openGame(g);};
+ grid.appendChild(b);
+});
+
+/* ---------- playing a game ---------- */
+var cur=null;
+function openGame(g){
+ if(!activeId()){showWho();return;}
+ if(window.PT613_LIC&&!PT613_LIC.allowed()){PT613_LIC.show();return;}   /* v1.0.3 licence gate */
+ if(window.PT613_PC&&!PT613_PC.canPlay(g))return;                      /* v1.0.4 parent controls: hidden game, blocked time or time used up */
+ localStorage.setItem(META+"active",activeId());   /* the game's save space follows the chosen player */
+ cur=g; $("pTitle").textContent=g.title; $("home").style.display="none"; $("play").style.display="flex";
+ fitFrame(); $("frame").src="games/"+g.id+"/index.html"; setTimeout(function(){try{$("frame").focus();}catch(e){}},200);
+ if(window.PT613_PC)PT613_PC.started(g);
+}
+function goHome(){
+ if(!cur)return; cur=null;
+ $("frame").src="about:blank";               /* lets the game run its own save-on-exit */
+ $("play").style.display="none"; $("home").style.display="block";
+ if(window.PT613_PC)PT613_PC.stopped();
+ setTimeout(mirrorNow,400);
+ if(window.PT613_LIC)PT613_LIC.homeShown();   /* a licence change found mid-game shows now, never during play */
+}
+/* v1.0.3 fit-to-window: a game always gets at least FIT_W x FIT_H (CSS px) to lay itself out in. On a smaller
+   window (small laptop, 125%/150% Windows scaling) the whole game is drawn at that size and scaled down to fill the
+   window exactly, so no game's buttons are ever cut off. Bigger windows are untouched (scale 1). No game code changes. */
+var FIT_W=1100, FIT_H=700;
+function fitFrame(){
+ var fw=$("fw"), f=$("frame"); if(!fw||!f)return;
+ var w=fw.clientWidth, h=fw.clientHeight; if(!w||!h)return;
+ var sc=Math.min(1, w/FIT_W, h/FIT_H);
+ if(sc>=0.999){ f.style.width="100%"; f.style.height="100%"; f.style.transform=""; }
+ else { f.style.width=(w/sc)+"px"; f.style.height=(h/sc)+"px"; f.style.transform="scale("+sc+")"; }
+ window.__pt613Scale=sc;
+}
+window.addEventListener("resize",fitFrame);
+$("bHome").onclick=goHome;
+window.addEventListener("message",function(e){var d=e.data||{}; if(d.pt613==="home")goHome(); else if(d.pt613==="key"&&d.key==="F11")toggleFull();});
+
+/* ---------- full screen ---------- */
+var full=false;
+function toggleFull(){full=!full; if(NL){try{full?Neutralino.window.setFullScreen():Neutralino.window.exitFullScreen();}catch(e){}} else {try{full?document.documentElement.requestFullscreen():document.exitFullscreen();}catch(e){}}}
+$("bFull").onclick=toggleFull;
+window.addEventListener("keydown",function(e){if(e.key==="F11"){e.preventDefault();toggleFull();}},true);
+
+/* ---------- saves ----------
+   Every game keeps its progress in its own space ("pt613:<game id>:" keys) in this app's storage,
+   which lives in the user's AppData, not in the .exe, so replacing the .exe with a new version keeps it.
+   Belt and braces: a copy of all progress is also written to AppData\Playtime613\saves.json and is
+   loaded back automatically if the app's storage ever starts empty (for example a re-downloaded copy
+   saved as "Playtime613 (1).exe"). */
+/* Player profiles (v1.0.2): Player 1 = id "p1" keeps the original "pt613:<game>:" keys, so every save made
+   before profiles existed simply IS Player 1's (nothing is moved or copied). Other players: "pt613@<id>:<game>:".
+   The list of players lives in "pt613meta:profiles", the chosen one in "pt613meta:active" (read by each game's
+   shim when it opens). All of these start with "pt613", and allSaves() = everything starting with "pt613",
+   so the AppData copy, Back up and Restore carry all players at once. */
+var META="pt613meta:", SAVE_RE=/^pt613(:|@|meta:)/, GAME_RE=/^pt613(?::|@(p[a-z0-9]+):)([^:]+):/, MAXP=12;
+function allSaves(){var o={};for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&SAVE_RE.test(k))o[k]=localStorage.getItem(k);}return o;}
+function gameKeys(o){return Object.keys(o).filter(function(k){return GAME_RE.test(k);});}
+function countGames(o){var s={};gameKeys(o).forEach(function(k){var m=k.match(GAME_RE);s[(m[1]||"p1")+"/"+m[2]]=1;});return Object.keys(s).length;}
+function playersIn(o){var s={};gameKeys(o).forEach(function(k){s[k.match(GAME_RE)[1]||"p1"]=1;});return Object.keys(s).length;}
+var dataDir=null, last="";
+function ready(){ return NL && dataDir; }
+function mirrorNow(){
+ if(!ready())return Promise.resolve();
+ var o=allSaves(), j=JSON.stringify(o); if(j===last||j==="{}")return Promise.resolve();
+ var body=JSON.stringify({app:"Playtime613",version:APP_VERSION,savedAt:new Date().toISOString(),saves:o});
+ return Neutralino.filesystem.writeFile(dataDir+"/saves.json.tmp",body)
+  .then(function(){return Neutralino.filesystem.copy(dataDir+"/saves.json.tmp",dataDir+"/saves.json",{overwrite:true}).catch(function(){return Neutralino.filesystem.writeFile(dataDir+"/saves.json",body);});})
+  .then(function(){last=j;}).catch(function(){});
+}
+function applySaves(o,replace){
+ /* a file from v1.0.2+ carries the player list: it replaces everything.
+    a file from before profiles (v1.0.0/1.0.1) only has "pt613:" keys = Player 1: it replaces Player 1's progress only. */
+ var hasMeta=Object.prototype.hasOwnProperty.call(o,META+"profiles");
+ if(replace){Object.keys(allSaves()).forEach(function(k){ if(hasMeta || /^pt613:/.test(k)) localStorage.removeItem(k);});}
+ Object.keys(o).forEach(function(k){if(SAVE_RE.test(k) && k!==META+"active")localStorage.setItem(k,String(o[k]));});
+ if(!hasMeta && gameKeys(o).length){ var ps=loadProfiles(); if(!ps.some(function(p){return p.id==="p1";})){ ps.unshift({id:"p1",name:"Player 1",av:"k:#2a62d6"}); saveProfiles(ps);} }
+ ensureProfiles();
+}
+function startSaves(){
+ return Neutralino.os.getPath("data").then(function(p){
+  dataDir=p.replace(/[\\\/]+$/,"")+"/Playtime613";
+  return Neutralino.filesystem.createDirectory(dataDir).catch(function(){});
+ }).then(function(){
+  return Neutralino.filesystem.readFile(dataDir+"/saves.json").then(function(txt){
+   var f=JSON.parse(txt), o=(f&&f.saves)||{};
+   if(gameKeys(allSaves()).length===0 && gameKeys(o).length){ applySaves(o,true); if(window.PT613_PC)PT613_PC.reload(); last=JSON.stringify(allSaves()); if(active&&!getP(active)){active=null;showWho();} renderWho(); renderChip(); toast("Welcome back! Your progress is loaded.",3500); }
+  }).catch(function(){});
+ }).then(function(){ setInterval(mirrorNow,10000); mirrorNow(); });
+}
+function stamp(){var d=new Date();function z(n){return (n<10?"0":"")+n;}return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate());}
+function stamp2(){var d=new Date();function z(n){return (n<10?"0":"")+n;}return stamp()+" "+z(d.getHours())+"-"+z(d.getMinutes());}
+function backupDir(){ return Neutralino.os.getPath("documents").then(function(p){ return p.replace(/[\\\/]+$/,"")+"/Playtime613 backups"; }); }
+$("bBackup").onclick=function(){
+ var o=allSaves(); if(!gameKeys(o).length){toast("Nothing to back up yet. Play a game first!");return;}
+ var body=JSON.stringify({app:"Playtime613",version:APP_VERSION,savedAt:new Date().toISOString(),saves:o},null,1);
+ if(!NL){var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([body],{type:"application/json"}));a.download="Playtime613-saves-"+stamp()+".json";a.click();return;}
+ var dir; backupDir().then(function(d){dir=d;return Neutralino.filesystem.createDirectory(dir).catch(function(){});})
+ .then(function(){return Neutralino.filesystem.writeFile(dir+"/Playtime613-saves-"+stamp2()+".json",body);})
+ .then(function(){var n=loadProfiles().length;toast("Backed up! Saved in Documents › Playtime613 backups ("+n+" player"+(n==1?"":"s")+").",4500);})
+ .catch(function(){toast("Couldn't save the backup file.");});
+};
+function closePick(){var m=$("pick");if(m)m.remove();}
+$("bRestore").onclick=function(){ if(window.PT613_PC)PT613_PC.guard(restoreSaves,"Type your parent PIN to restore saves."); else restoreSaves(); };
+function restoreSaves(){
+ if(!NL){toast("Restore works in the app.");return;}
+ var dir; backupDir().then(function(d){dir=d;return Neutralino.filesystem.readDirectory(dir);})
+ .then(function(list){
+  var files=(list||[]).filter(function(e){return e.type==="FILE"&&/\.json$/i.test(e.entry);}).map(function(e){return e.entry;}).sort().reverse();
+  var m=document.createElement("div"); m.id="pick";
+  m.innerHTML='<div class="pk"><h3>📂 Restore saves</h3>'+(files.length?'<p>Pick a backup. It replaces the progress on this computer.</p>'+files.slice(0,12).map(function(f){return '<button class="pf" data-f="'+esc(f)+'">'+esc(f.replace(/^Playtime613-saves-/,"").replace(/\.json$/i,""))+'</button>';}).join(""):'<p>No backups found yet.</p>')+
+   '<p class="small">Backups live in Documents › Playtime613 backups. To move progress to another computer, copy a backup file into that folder there.</p><button class="pc">Cancel</button></div>';
+  document.body.appendChild(m);
+  m.querySelector(".pc").onclick=closePick;
+  Array.prototype.forEach.call(m.querySelectorAll(".pf"),function(b){b.onclick=function(){
+   var f=b.getAttribute("data-f");
+   Neutralino.filesystem.readFile(dir+"/"+f).then(function(txt){
+    var j=JSON.parse(txt), o=j&&j.saves; if(!o||typeof o!=="object"||j.app!=="Playtime613")throw new Error("bad");
+    if(window.PT613_PC)PT613_PC.keepAcross(function(){applySaves(o,true);}); else applySaves(o,true); last=""; closePick(); localStorage.removeItem(META+"active"); active=null; renderWho(); showWho();
+    var np=playersIn(o); return mirrorNow().then(function(){toast("Restored! Progress for "+np+" player"+(np==1?"":"s")+" is back. Who's playing?",4000);});
+   }).catch(function(){closePick();toast("That file isn't a Playtime613 backup.");});
+  };});
+ }).catch(function(){toast("No backups found yet. Use 💾 Back up saves first.",4000);});
+}
+
+/* ---------- players ("Who's playing?") ---------- */
+/* avatars: a boy with a kippah (several kippah colours), a girl (modest: high neckline, hair tied back; several bow colours), animals and things. Keys: "k:<colour>" boy, "g:<colour>" girl. */
+var KIPPAH=["#2a62d6","#1d1d24","#2f9e44","#c0392b","#8e44ad","#f39c12"];
+var EMOJI=["🦁","🐻","🐼","🐯","🦊","🐵","🐶","🐱","🐰","🐨","🐸","🐧","🦉","🐢","🐬","🦒","🐘","🦖","🐴","🐝","⚽","🏀","🚀","🚒","🚑","🚂","✈️","⭐","🌈","🍕","📚","🎨","🏆","⛵"];
+var GIRL=["#e8478b","#2a62d6","#2f9e44","#c0392b","#8e44ad","#f39c12"];
+/* each girl: hair colour + style (pony = ponytail with bow, plaits = two plaits with ribbons, band = ponytail with alice band, bandp = plaits with alice band) */
+var GIRLHAIR=[["#6b4226","pony"],["#3b2414","plaits"],["#1e1b1a","band"],["#9a3f1c","plaits"],["#d9a548","pony"],["#4a2c18","bandp"]];
+function girlKid(c){
+ var i=GIRL.indexOf(c); if(i<0)i=0; var h=GIRLHAIR[i][0], st=GIRLHAIR[i][1], plaits=(st==="plaits"||st==="bandp"), band=(st==="band"||st==="bandp");
+ var back='', front='', bow='';
+ if(!plaits){ back='<path d="M66 34c14 2 21 16 18 34c-2 10-6 17-10 21c1-9 0-17-3-24c-3-7-7-11-11-14z" fill="'+h+'"/>'+
+   '<path d="M73 46q6 12 3 28" stroke="rgba(0,0,0,.18)" stroke-width="1.6" fill="none" stroke-linecap="round"/>'; }
+ else { var pl=function(x,d){ var o='<path d="M'+x+' 58q'+(d*-2)+' 14 '+(d*-1)+' 30" stroke="'+h+'" stroke-width="9" fill="none" stroke-linecap="round"/>';
+    for(var k=0;k<4;k++){ var y=62+k*6.5; o+='<path d="M'+(x-d*-0.0-4.5+(d*-0.25*k))+' '+y+'q4.5 3 9 0" stroke="rgba(0,0,0,.22)" stroke-width="1.4" fill="none"/>'; }
+    o+='<path d="M'+(x-d-6)+' 86l6 4l-6 4zM'+(x-d+6)+' 86l-6 4l6 4z" fill="'+c+'"/><circle cx="'+(x-d)+'" cy="90" r="2.4" fill="'+c+'"/>'; return o; };
+   front=pl(27,1)+pl(73,-1); }
+ if(band) bow='<path d="M27.5 40q22.5-24 45 0" stroke="'+c+'" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M33 34q17-14 34 0" stroke="rgba(255,255,255,.45)" stroke-width="1.4" fill="none"/>';
+ else if(!plaits) bow='<path d="M66 31l-9-7l1 13zM66 31l9-8l1 13z" fill="'+c+'"/><circle cx="66" cy="31" r="3.2" fill="'+c+'"/><circle cx="66" cy="31" r="3.2" fill="rgba(0,0,0,.15)"/>';
+ return '<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="50" fill="#ffdbe9"/>'+back+
+  '<path d="M16 100c3-19 17-28 34-28s31 9 34 28z" fill="'+c+'"/><path d="M16 100c3-19 17-28 34-28s31 9 34 28z" fill="rgba(255,255,255,.55)"/>'+
+  '<ellipse cx="50" cy="54" rx="25" ry="27" fill="#f6c9a0"/>'+
+  '<path d="M36 80q7 10 14 4q7 6 14-4q-7-2.6-14-2.6t-14 2.6z" fill="#ffffff" stroke="#e7dce8" stroke-width="1"/>'+
+  '<path d="M24.5 60c-3-24 8-36 25.5-36s28.5 12 25.5 36c-1-9-4-15-8-18c-4 4-12 6-19 5c-5-1-9-4-11-7c-6 3-11 10-13 20z" fill="'+h+'"/>'+
+  '<path d="M46 26q-4 10-10 16" stroke="rgba(255,255,255,.18)" stroke-width="1.6" fill="none" stroke-linecap="round"/>'+
+  front+bow+
+  '<circle cx="41" cy="56" r="3.6" fill="#2b2b2b"/><circle cx="59" cy="56" r="3.6" fill="#2b2b2b"/>'+
+  '<circle cx="42.2" cy="54.8" r="1.1" fill="#fff"/><circle cx="60.2" cy="54.8" r="1.1" fill="#fff"/>'+
+  '<path d="M36 49q5-2.5 10 0M54 49q5-2.5 10 0" stroke="'+h+'" stroke-width="1.8" fill="none" stroke-linecap="round"/>'+
+  '<path d="M42 66q8 7 16 0" stroke="#a5482e" stroke-width="3" fill="none" stroke-linecap="round"/>'+
+  '<circle cx="34.5" cy="63.5" r="4" fill="#f4a7a0" opacity=".5"/><circle cx="65.5" cy="63.5" r="4" fill="#f4a7a0" opacity=".5"/></svg>';
+}
+var AVATARS=KIPPAH.map(function(c){return "k:"+c;}).concat(GIRL.map(function(c){return "g:"+c;}),EMOJI);
+function kippahBoy(c){
+ return '<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="50" fill="#bfe3ff"/>'+
+  '<path d="M16 100c3-19 17-28 34-28s31 9 34 28z" fill="#ffffff"/><path d="M41 72l9 9 9-9z" fill="#dfe7f3"/>'+
+  '<ellipse cx="24.5" cy="55" rx="5" ry="7" fill="#eab48a"/><ellipse cx="75.5" cy="55" rx="5" ry="7" fill="#eab48a"/>'+
+  '<ellipse cx="50" cy="54" rx="25" ry="27" fill="#f6c9a0"/>'+
+  '<path d="M25 50c-1-17 10-26 25-26s26 9 25 26c-3-6-6-9-9-10c-6 3-26 3-32 0c-3 1-6 4-9 10z" fill="#5a3a22"/>'+
+  '<path d="M27.5 52q-3 6 0 10q3 4 0 8" stroke="#5a3a22" stroke-width="2.4" fill="none" stroke-linecap="round"/>'+
+  '<path d="M72.5 52q3 6 0 10q-3 4 0 8" stroke="#5a3a22" stroke-width="2.4" fill="none" stroke-linecap="round"/>'+
+  '<path d="M29 31q21-25 42 0q-21 -6 -42 0z" fill="'+c+'"/><path d="M33 28q17-16 34 0" stroke="rgba(255,255,255,.5)" stroke-width="1.8" fill="none"/>'+
+  '<circle cx="41" cy="55" r="3.6" fill="#2b2b2b"/><circle cx="59" cy="55" r="3.6" fill="#2b2b2b"/>'+
+  '<circle cx="42.2" cy="53.8" r="1.1" fill="#fff"/><circle cx="60.2" cy="53.8" r="1.1" fill="#fff"/>'+
+  '<path d="M36 47.5q5-2.5 10 0M54 47.5q5-2.5 10 0" stroke="#5a3a22" stroke-width="2" fill="none" stroke-linecap="round"/>'+
+  '<path d="M41 66q9 8 18 0" stroke="#a5482e" stroke-width="3" fill="none" stroke-linecap="round"/>'+
+  '<circle cx="34.5" cy="63" r="4" fill="#f4a7a0" opacity=".5"/><circle cx="65.5" cy="63" r="4" fill="#f4a7a0" opacity=".5"/></svg>';
+}
+function avHTML(a){ a=a||"k:"+KIPPAH[0]; return a.indexOf("k:")===0 ? kippahBoy(esc(a.slice(2))) : a.indexOf("g:")===0 ? girlKid(esc(a.slice(2))) : esc(a); }
+function loadProfiles(){ try{ var p=JSON.parse(localStorage.getItem(META+"profiles")||"null"); return Array.isArray(p)?p.filter(function(x){return x&&/^p[a-z0-9]+$/.test(x.id);}):null; }catch(e){ return null; } }
+function saveProfiles(ps){ localStorage.setItem(META+"profiles",JSON.stringify(ps)); }
+/* first start of v1.0.2 on any PC: one player, "Player 1" = all the progress already on this computer (or a fresh start) */
+function ensureProfiles(){ var ps=loadProfiles(); if(!ps){ ps=[{id:"p1",name:"Player 1",av:"k:"+KIPPAH[0]}]; saveProfiles(ps);} return ps; }
+function prefixOf(id){ return id==="p1" ? "pt613:" : "pt613@"+id+":"; }
+function gamesPlayed(id){ var pre=prefixOf(id), s={}; for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i); if(k&&k.indexOf(pre)===0) s[k.slice(pre.length).split(":")[0]]=1;} return Object.keys(s).length; }
+var active=null;
+function activeId(){ return active; }
+function getP(id){ return (loadProfiles()||[]).filter(function(p){return p.id===id;})[0]||null; }
+function renderChip(){ var p=active&&getP(active); if(!p)return; $("chipAv").innerHTML=avHTML(p.av); $("chipName").textContent=p.name; $("homeSub").textContent="Hi "+p.name+"! Pick a game and go. Your progress saves on this computer."; }
+function choose(id){
+ active=id; localStorage.setItem(META+"active",id); localStorage.setItem(META+"last",id);
+ renderChip(); if(window.PT613_PC)PT613_PC.refreshHome(); $("who").style.display="none"; $("home").style.display="block"; $("home").scrollTop=0;
+ setTimeout(function(){var t=grid.querySelector(".tile"); if(t)try{t.focus({preventScroll:true});}catch(e){}},50);
+ mirrorNow();
+}
+function showWho(){ if(cur)goHome(); closePick(); renderWho(); $("home").style.display="none"; $("who").style.display="block";
+ setTimeout(function(){var t=$("pgrid").querySelector(".lastp")||$("pgrid").querySelector(".ptile"); if(t)try{t.focus();}catch(e){}},50); }
+function renderWho(){
+ var ps=ensureProfiles(), lastId=localStorage.getItem(META+"last"), g=$("pgrid"); g.innerHTML="";
+ ps.forEach(function(p){
+  var n=gamesPlayed(p.id), b=document.createElement("div"); b.className="ptile"+(p.id===lastId&&ps.length>1?" lastp":""); b.tabIndex=0; b.setAttribute("role","button"); b.setAttribute("data-pid",p.id);
+  b.innerHTML=(p.id===lastId&&ps.length>1?'<span class="lastb">LAST PLAYED</span>':'')+(window.PT613_PC&&PT613_PC.locked(p.id)?'<span class="pclk" title="This player has a PIN">🔒</span>':'')+'<button class="ed" title="Change name or picture">✏️</button>'+
+   '<div class="av">'+avHTML(p.av)+'</div><div class="pn">'+esc(p.name)+'</div><div class="ps">'+(n?n+" game"+(n==1?"":"s")+" played":"New player")+'</div>';
+  /* v1.0.4: a player a parent gave a PIN needs his PIN (or the grown-up PIN) to pick */
+  var pickP=function(){ if(window.PT613_PC)PT613_PC.choosePlayer(p.id,function(){choose(p.id);}); else choose(p.id); };
+  b.onclick=function(e){ if(e.target.closest(".ed")){ e.stopPropagation(); editPlayer(p.id); return; } pickP(); };
+  b.onkeydown=function(e){ if(e.target.closest(".ed"))return; if(e.key==="Enter"||e.key===" "){ e.preventDefault(); pickP();} };
+  g.appendChild(b);
+ });
+ if(ps.length<MAXP){
+  var a=document.createElement("div"); a.className="ptile add"; a.tabIndex=0; a.setAttribute("role","button"); a.id="addPlayer";
+  a.innerHTML='<div class="av">+</div><div class="pn">Add player</div><div class="ps">&nbsp;</div>';
+  /* v1.0.4: once a parent PIN exists, adding a player needs it (so a child can't make a player with no limits) */
+  var addP=function(){ if(window.PT613_PC)PT613_PC.guard(function(){editPlayer(null);},"Type your parent PIN to add a player."); else editPlayer(null); };
+  a.onclick=addP; a.onkeydown=function(e){ if(e.key==="Enter"||e.key===" "){e.preventDefault();addP();} };
+  g.appendChild(a);
+ }
+}
+function newId(){ var ps=loadProfiles()||[], id; do{ id="p"+Date.now().toString(36)+Math.floor(Math.random()*36).toString(36);}while(id==="p1"||ps.some(function(p){return p.id===id;})); return id; }
+function editPlayer(id){
+ closePick();
+ var ps=ensureProfiles(), p=id?getP(id):null, pick=p?p.av:AVATARS[(ps.length)%KIPPAH.length];
+ var m=document.createElement("div"); m.id="pick";
+ m.innerHTML='<div class="pk wide"><h3>'+(p?"✏️ Change player":"➕ New player")+'</h3>'+
+  '<p>Name</p><input class="nmi" maxlength="18" placeholder="Type a name" value="'+(p?esc(p.name):"")+'">'+
+  '<p>Pick a picture</p><div class="avs">'+AVATARS.map(function(a){return '<button data-a="'+esc(a)+'" class="'+(a==="g:"+GIRL[0]?'g0':'')+(a===pick?' on':'')+'"><span class="av">'+avHTML(a)+'</span></button>';}).join("")+'</div>'+
+  '<div class="row"><button class="ok">'+(p?"Save":"Add player")+'</button><button class="pc">Cancel</button>'+(p?'<button class="del">🗑️ Delete player</button>':'')+'</div></div>';
+ document.body.appendChild(m);
+ var inp=m.querySelector(".nmi"); setTimeout(function(){try{inp.focus();inp.select();}catch(e){}},30);
+ Array.prototype.forEach.call(m.querySelectorAll(".avs button"),function(b){b.onclick=function(){
+  Array.prototype.forEach.call(m.querySelectorAll(".avs button"),function(x){x.classList.remove("on");}); b.classList.add("on"); pick=b.getAttribute("data-a"); };});
+ m.querySelector(".pc").onclick=closePick;
+ function save(){
+  var nm=inp.value.replace(/\s+/g," ").trim(); if(!nm){ inp.focus(); inp.placeholder="Please type a name"; return; }
+  var ps=ensureProfiles();
+  if(p){ ps.forEach(function(x){ if(x.id===p.id){x.name=nm;x.av=pick;} }); }
+  else { if(ps.length>=MAXP){closePick();return;} ps.push({id:newId(),name:nm,av:pick}); }
+  saveProfiles(ps); closePick(); renderWho(); renderChip(); mirrorNow();
+  toast(p?"Saved!":"Welcome, "+nm+"! Tap your name to play.");
+ }
+ m.querySelector(".ok").onclick=save; inp.onkeydown=function(e){ if(e.key==="Enter")save(); };
+ if(p) m.querySelector(".del").onclick=function(){ if(window.PT613_PC)PT613_PC.guard(function(){confirmDelete(p);},"Type your parent PIN to delete a player."); else confirmDelete(p); };
+}
+function confirmDelete(p){
+ closePick();
+ var n=gamesPlayed(p.id), m=document.createElement("div"); m.id="pick";
+ m.innerHTML='<div class="pk"><h3>Delete '+esc(p.name)+'?</h3><p>'+(n?"All of "+esc(p.name)+"'s progress in "+n+" game"+(n==1?"":"s")+" will be gone. This can't be undone (unless you have a backup).":"This player has no progress yet.")+'</p>'+
+  '<div class="row"><button class="del warn">Yes, delete</button><button class="pc">No, keep</button></div></div>';
+ document.body.appendChild(m);
+ m.querySelector(".pc").onclick=function(){ closePick(); };
+ m.querySelector(".del").onclick=function(){
+  var pre=prefixOf(p.id), kill=[];
+  for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i); if(k&&k.indexOf(pre)===0)kill.push(k);}
+  kill.forEach(function(k){localStorage.removeItem(k);});
+  saveProfiles((loadProfiles()||[]).filter(function(x){return x.id!==p.id;}));
+  if(window.PT613_PC)PT613_PC.forgetPlayer(p.id);
+  if(localStorage.getItem(META+"last")===p.id) localStorage.removeItem(META+"last");
+  if(active===p.id){ active=null; localStorage.removeItem(META+"active"); }
+  closePick(); renderWho(); mirrorNow(); toast(p.name+" was deleted.");
+ };
+}
+$("bSwitch").onclick=showWho;
+try{ ensureProfiles(); renderWho(); showWho(); }catch(e){ try{console.error("who screen",e);}catch(_){} }   /* 1.0.5: never let this stop parent controls from attaching below */
+/* v1.0.4 parent controls (shell/parent-controls.js) */
+try{ if(window.PT613_PC)PT613_PC.attach({GAMES:GAMES,activeId:activeId,getP:getP,profiles:ensureProfiles,avHTML:avHTML,toast:toast,goHome:goHome,renderWho:renderWho,openGame:openGame,current:function(){return cur;}}); }catch(e){ try{console.error("parent controls attach",e);}catch(_){} }
+if(window.PT613_UPD)PT613_UPD.attach({mirror:function(){return ready()?mirrorNow():Promise.resolve();},current:function(){return cur;},toast:toast});   /* v1.0.5 in-app updates */
+
+/* ---------- app window ---------- */
+if(NL){
+ try{Neutralino.init();}catch(e){}
+ /* v1.0.3: the licence code first looks for saves left by older versions (founding customers), THEN the save mirror may write saves.json */
+ ((window.PT613_LIC&&PT613_LIC.localReady)||Promise.resolve()).then(startSaves).catch(function(){});
+ Neutralino.events.on("windowClose",function(){
+  try{$("frame").src="about:blank";}catch(e){}
+  setTimeout(function(){ mirrorNow().then(function(){Neutralino.app.exit();},function(){Neutralino.app.exit();}); },350);
+  setTimeout(function(){try{Neutralino.app.exit();}catch(e){}},3000);
+ });
+}
+})();
+</script>
+</body>
+</html>

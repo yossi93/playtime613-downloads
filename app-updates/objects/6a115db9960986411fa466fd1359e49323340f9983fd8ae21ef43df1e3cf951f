@@ -1,0 +1,739 @@
+/* Playtime613 v1.0.4 - PARENT CONTROLS (per player): daily time, which games each child sees, blocked times,
+   5-minute reminder, all locked with a 4-digit parent PIN.
+   Storage: the app's own save space, same place as the game saves (so they're copied to AppData\Playtime613\saves.json,
+   carried by Back up / Restore, and survive app updates). NEVER in licence storage.
+     "pt613meta:parent"     settings  {v:1, pin:{s:salt,h:hash}|null, kids:{<player id>:{limit:null|minutes, remind:bool, hidden:[game ids], blocks:[...],
+                                       pin:{s:salt,h:hash}|null (this player's own PIN: needed to pick him; the grown-up PIN works too), maxAge:null|5..13 (games for ages up to),
+                                       grace:0|2|5 (minutes to finish the round when the daily time runs out; default 2)}}}
+                              setup:"later"|"done" (the one-time "Set up parent controls?" screen was answered)
+                              shabbos:{on:bool, city:key|"custom", lat, lon, tz, israel:bool, before:min, after:min}  (Shabbos & Yom Tov lock, whole computer)
+     "pt613meta:parentday"  today     {date:"YYYY-MM-DD" (local), used:{pid:seconds}, bonus:{pid:minutes}, warned:{key:1}, allow:{pid:until ms},
+                                       ageok:{pid:[game ids a grown-up allowed today, over the age limit]}, grace:{pid:ms when today's finish-up time ends}}
+   A game shown as "on" is anything NOT in hidden[], so new games are on for everyone by default.
+   Test hook (inert in the app): index.html?pt613_pc_test=1 exposes window.PT613_PC.test (clock override, used time). */
+(function(){
+"use strict";
+var KEY="pt613meta:parent", DAYKEY="pt613meta:parentday", MAXLIM=360, MAXBLOCKS=8;
+var TEST=/[?&]pt613_pc_test=1\b/.test(location.search), clockOff=0, speed=1;
+function now(){ return Date.now()+clockOff; }
+var A=null;                                   /* the app's API, given by index.html */
+var $=function(id){return document.getElementById(id);};
+function esc(t){return String(t==null?"":t).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+function z(n){return (n<10?"0":"")+n;}
+function dayStr(ms){var d=new Date(ms);return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate());}
+var DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+/* ---------- MINIMUM AGE per game: THE one table to edit (from the honest age review, Oct 2026) ----------
+   A child whose "Show games for ages up to" is below a game's age doesn't see that game. Each home tile shows "<age>+".
+   A game missing from this table has no age: no badge, and it shows for every age setting. */
+var MIN_AGE={
+ "beis-hamikdash":8, "sukkah-builder":6, "noach-ark":5, "milchig-or-fleishig":5,           /* Torah */
+ "times-trial":6, "chess-academy":6, "gittels-bakery":5,                                    /* Learn */
+ "simcha-park":8, "pickle-boy-rescue":7, "zevdov-deli":6, "bakery-rush":5, "herring-juice":4,
+ "shomrim-patrol":6, "hatzolah-dash":6, "chaverim":6                                        /* Fun */
+};
+var AGE_STEPS=[null,5,6,7,8,9,10,11,12,13];
+var GRACE=[0,2,5];                                                                          /* "When time is up": minutes to finish the round (default 2) */                                                 /* null = All ages */
+function minAge(id){ var a=MIN_AGE[id]; return typeof a==="number"?a:null; }
+
+/* ---------- storage ---------- */
+function load(){ try{ var o=JSON.parse(localStorage.getItem(KEY)||"null"); if(o&&typeof o==="object"){ o.kids=o.kids||{}; return o; } }catch(e){} return {v:1,pin:null,kids:{}}; }
+var S=load();
+function save(){ localStorage.setItem(KEY,JSON.stringify(S)); }
+function kid(pid){ var k=S.kids[pid]; if(!k){ k={limit:null,remind:true,hidden:[],blocks:[]}; } if(!Array.isArray(k.hidden))k.hidden=[]; if(!Array.isArray(k.blocks))k.blocks=[]; if(k.remind==null)k.remind=true;
+ if(!(k.pin&&k.pin.h))k.pin=null; delete k.lock; if(AGE_STEPS.indexOf(k.maxAge)<0)k.maxAge=null; if(GRACE.indexOf(k.grace)<0)k.grace=2; return k; }
+function setKid(pid,k){ S.kids[pid]=k; save(); savedFlash(); }
+function D(){
+ var d=null; try{ d=JSON.parse(localStorage.getItem(DAYKEY)||"null"); }catch(e){}
+ var t=dayStr(now());
+ if(!d||d.date!==t){ var allow=(d&&d.allow)||{}; d={date:t,used:{},bonus:{},warned:{},allow:allow,ageok:{},grace:{}}; localStorage.setItem(DAYKEY,JSON.stringify(d)); }
+ d.used=d.used||{}; d.bonus=d.bonus||{}; d.warned=d.warned||{}; d.allow=d.allow||{}; d.ageok=d.ageok||{}; d.grace=d.grace||{};
+ return d;
+}
+function saveD(d){ localStorage.setItem(DAYKEY,JSON.stringify(d)); }
+function hasPin(){ return !!(S.pin&&S.pin.h); }
+/* ---------- Shabbos & Yom Tov lock (times from shell/shabbos-times.js, all offline). No PIN opens it. ---------- */
+var Z=window.PT613_ZMANIM||null, SB_MARGINS=[0,5,10,15,20,30,45,60];
+function guessCity(){ var tz=""; try{ tz=Intl.DateTimeFormat().resolvedOptions().timeZone||""; }catch(e){}
+ return {"America/New_York":"brooklyn","America/Toronto":"toronto","America/Chicago":"chicago","America/Los_Angeles":"losangeles","Asia/Jerusalem":"jerusalem","Europe/Brussels":"antwerp","Europe/Paris":"paris","Europe/Zurich":"zurich","Australia/Melbourne":"melbourne","Australia/Sydney":"sydney","Africa/Johannesburg":"johannesburg","America/Argentina/Buenos_Aires":"buenosaires"}[tz]||"london"; }
+function sbCfg(){ var c=S.shabbos; if(!c||typeof c!=="object"){ c={on:false,city:guessCity(),before:15,after:15}; }
+ if(SB_MARGINS.indexOf(+c.before)<0)c.before=15; if(SB_MARGINS.indexOf(+c.after)<0)c.after=15; c.on=c.on===true; return c; }
+function sbPlace(){ return Z?Z.place(sbCfg()):null; }
+function shabNow(){ if(!Z)return null; var c=sbCfg(); if(!c.on)return null; try{ return Z.lockAt(now(),c); }catch(e){ return null; } }
+function sbT(ms,tz,day,round){ return Z.fmt(tz,ms,{day:day,round:round}); }
+
+/* ---------- PIN (stored as a salted hash, never the digits) ---------- */
+function hash(s){ var h=0x811c9dc5, h2=0x12345; for(var r=0;r<400;r++){ for(var i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619)>>>0; h2=(Math.imul(h2^h,2246822519)+r)>>>0; } s=s+":"+h.toString(36); s=s.slice(-48); } return h.toString(16)+h2.toString(16); }
+function setPin(p){ var salt=Math.random().toString(36).slice(2,10)+now().toString(36); S.pin={s:salt,h:hash(salt+"|"+p)}; save(); }
+function pinOk(p){ return hasPin()&&hash(S.pin.s+"|"+p)===S.pin.h; }
+/* a player's own PIN (same salted hash). A child PIN may not equal the grown-up PIN or another player's PIN, and vice versa. */
+function kidPinOk(pid,p){ var k=S.kids[pid]; return !!(k&&k.pin&&k.pin.h&&hash(k.pin.s+"|"+p)===k.pin.h); }
+function setKidPin(pid,p){ var k=kid(pid), salt=Math.random().toString(36).slice(2,10)+now().toString(36); k.pin={s:salt,h:hash(salt+"|"+p)}; setKid(pid,k); }
+function pinOwner(p,except){ for(var id in S.kids){ if(id!==except&&kidPinOk(id,p)){ var pl=A&&A.getP(id); return pl?pl.name:"another player"; } } return null; }
+
+/* ---------- rules ---------- */
+function mins(t){ var m=/^(\d{1,2}):(\d{2})$/.exec(t||""); return m?(+m[1])*60+(+m[2]):null; }
+function blockAt(pid,ms){
+ var k=kid(pid), d=new Date(ms), t=d.getHours()*60+d.getMinutes(), wd=d.getDay(), yd=(wd+6)%7;
+ for(var i=0;i<k.blocks.length;i++){
+  var b=k.blocks[i], f=mins(b.from), e=mins(b.to), days=(b.days&&b.days.length)?b.days:[0,1,2,3,4,5,6];
+  if(f==null||e==null||f===e)continue;
+  if(f<e){ if(t>=f&&t<e&&days.indexOf(wd)>=0)return b; }
+  else { if(t>=f&&days.indexOf(wd)>=0)return b; if(t<e&&days.indexOf(yd)>=0)return b; }   /* crosses midnight: belongs to the day it starts */
+ }
+ return null;
+}
+/* over this child's age limit (and not allowed by a grown-up today)? */
+function overAge(pid,id){ var k=kid(pid), a=minAge(id); if(k.maxAge==null||a==null||a<=k.maxAge)return false; var ok=D().ageok[pid]; return !(ok&&ok.indexOf(id)>=0); }
+function ageTxt(m){ return m==null?"All ages":"Ages up to "+m; }
+function blockNow(pid){ var d=D(); if(d.allow[pid]&&now()<d.allow[pid])return null; return blockAt(pid,now()); }
+function allowance(pid){ var k=kid(pid); if(k.limit==null)return Infinity; return (k.limit+(D().bonus[pid]||0))*60; }
+function usedSec(pid){ return Math.floor(D().used[pid]||0); }
+function remaining(pid){ var a=allowance(pid); return a===Infinity?Infinity:Math.max(0,a-usedSec(pid)); }
+function fmtMin(m){ if(m==null)return "Unlimited"; var h=Math.floor(m/60), r=m%60; return h?(h+(h==1?" hour":" hours")+(r?" "+r+" min":"")):(r+" min"); }
+function fmtLong(m){ var h=Math.floor(m/60), r=m%60; return (h?h+(h==1?" hour":" hours"):"")+(h&&r?" ":"")+(r||!h?r+(r==1?" minute":" minutes"):""); }
+function fmtLeft(sec){ return fmtLong(Math.max(1,Math.ceil(sec/60))); }
+/* a block's "HH:MM" shown the way this computer shows times (19:30 in the UK, 7:30 PM in the US) */
+function fmtT(hm){ var m=/^(\d{1,2}):(\d{2})$/.exec(hm||""); if(!m)return hm||""; try{ return new Date(2000,0,1,+m[1],+m[2]).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}); }catch(e){ return hm; } }
+function blockName(b){ return (b&&String(b.name||"").trim())||"blocked time"; }
+function blockEmoji(b){ var n=blockName(b).toLowerCase(); return /bed|night|sleep/.test(n)?"🌙":/school|cheder|yeshiva|learn|homework|seder/.test(n)?"🏫":/meal|supper|dinner|lunch|break/.test(n)?"🍽️":"⏸️"; }
+function daysTxt(b){ var d=(b.days&&b.days.length)?b.days.slice().sort():[0,1,2,3,4,5,6]; if(d.length===7)return "every day"; if(d.join()==="1,2,3,4,5")return "Mon–Fri"; if(d.join()==="0,1,2,3,4")return "Sun–Thu"; return d.map(function(i){return DAYS[i];}).join(", "); }
+
+/* ---------- CSS ---------- */
+var css=[
+'#pcBar{display:none;align-items:center;gap:6px;font-weight:800;font-size:14px;color:#17204A;background:#fff3c4;border-radius:999px;padding:5px 12px;white-space:nowrap}',
+'#pcBar.low{background:#ffd9a0}',
+'#pcHomeNote{display:inline-block;margin-left:10px;font-weight:800;font-size:14px;color:#17204A;background:#FFC629;border-radius:999px;padding:4px 12px;vertical-align:1px}',
+'#pcHomeNote.blk{background:#c9d3ff}#pcHomeNote.out{background:#ffd9a0}',
+'.pcEmpty{grid-column:1/-1;text-align:center;padding:50px 20px;color:rgba(255,255,255,.75);font-size:18px;background:rgba(255,255,255,.05);border:2px dashed rgba(255,255,255,.18);border-radius:18px}',
+'#pcToast{position:absolute;left:50%;top:14px;transform:translateX(-50%) translateY(-20px);opacity:0;transition:opacity .35s,transform .35s;z-index:5;display:flex;align-items:center;gap:14px;background:#FFC629;color:#17204A;border-radius:18px;padding:14px 18px 14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.45),0 4px 0 #C96A00;max-width:min(560px,90%);pointer-events:auto}',
+'#pcToast.on{opacity:1;transform:translateX(-50%) translateY(0)}',
+'#pcGrace{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:6;display:flex;align-items:center;gap:14px;background:#17204A;color:#fff;border:3px solid #FFC629;border-radius:18px;padding:12px 22px 12px 16px;box-shadow:0 10px 30px rgba(0,0,0,.5);max-width:min(600px,92%);pointer-events:none}',
+'#pcGrace .ic{font-size:34px;line-height:1}#pcGrace b{display:block;font-size:22px;line-height:1.2;color:#FFC629;font-variant-numeric:tabular-nums}#pcGrace span{font-size:14px;font-weight:600;opacity:.85}',
+'#pcToast .ic{font-size:34px;line-height:1}#pcToast b{display:block;font-size:19px;line-height:1.2}#pcToast span{font-size:14px;font-weight:600;opacity:.85}',
+'#pcToast button{margin-left:6px;border:0;background:rgba(23,32,74,.12);color:#17204A;width:32px;height:32px;border-radius:50%;font-size:18px;font-weight:800;cursor:pointer;flex:0 0 auto}',
+/* child screens (time's up / not now) */
+'#pcStop{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto;background:radial-gradient(1000px 560px at 50% -10%,#2c3d8f 0%,transparent 65%),#17204A;color:#fff;text-align:center}',
+'#pcStop .bx{max-width:900px;width:100%}',
+'#pcStop .big{width:150px;height:150px;margin:0 auto 18px;border-radius:50%;background:#FFC629;box-shadow:0 7px 0 #C96A00;display:flex;align-items:center;justify-content:center;font-size:84px;line-height:1}',
+'#pcStop.blk .big{background:#c9d3ff;box-shadow:0 7px 0 #7d8fe0}',
+'#pcStop h1{margin:0 0 10px;font-size:40px;font-weight:900;line-height:1.1}',
+'#pcStop p{margin:0 0 6px;font-size:19px;color:rgba(255,255,255,.82);line-height:1.45}',
+'#pcStop .row{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:26px}',
+'#pcStop button{font:inherit;font-weight:800;font-size:18px;border:0;border-radius:999px;padding:13px 28px;cursor:pointer}',
+'#pcStop .ok{background:#2dcc70;color:#10261a;box-shadow:0 4px 0 #1c8a4a}',
+'#pcStop .gr{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.25);font-size:15px;padding:11px 20px}',
+'#pcStop .stars{font-size:26px;letter-spacing:8px;margin:-4px 0 12px}',
+'#pcStop .xt{margin-top:22px;display:inline-block;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:22px;padding:16px 20px 14px}',
+'#pcStop .xq{font-size:19px;font-weight:800;margin-bottom:12px}#pcStop .xb{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}',
+'#pcStop .xb button{background:#FFC629;color:#17204A;box-shadow:0 4px 0 #C96A00;min-width:104px;padding:12px 18px}',
+'#pcStop .xc{margin-top:12px;background:rgba(255,255,255,.12);color:#fff;font-size:14px;padding:8px 18px}',
+'#pcSetup{position:fixed;inset:0;z-index:26;background:rgba(10,14,40,.72);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}',
+'#pcSetup .pp{background:#fff;color:#17204A;border-radius:22px;width:520px;max-width:94vw;padding:26px 30px 18px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5)}',
+'#pcSetup .lk{width:64px;height:64px;margin:0 auto 10px;border-radius:18px;background:#FFC629;box-shadow:0 3px 0 #C96A00;display:flex;align-items:center;justify-content:center;font-size:34px}',
+'#pcSetup h3{margin:0 0 8px;font-size:28px;font-weight:900}#pcSetup p{margin:0 0 6px;font-size:16.5px;color:#5c5677;line-height:1.45}#pcSetup p.sm{font-size:13px;margin-top:12px}',
+'#pcSetup .row{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:18px}#pcSetup button{font:inherit;font-weight:800;font-size:17px;border:0;border-radius:999px;padding:12px 26px;cursor:pointer}',
+'#pcSetup .go{background:#2dcc70;color:#10261a;box-shadow:0 4px 0 #1c8a4a}#pcSetup .lt{background:#efeaf9;color:#17204A}',
+'#pcShab{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto;background:radial-gradient(1000px 560px at 50% -10%,#3a3f8f 0%,transparent 65%),#141a3d;color:#fff;text-align:center}',
+'#pcShab .bx{max-width:900px;width:100%}#pcShab .big{width:150px;height:150px;margin:0 auto 18px;border-radius:50%;background:#fff3c4;box-shadow:0 7px 0 #d9a21c;display:flex;align-items:center;justify-content:center;font-size:84px;line-height:1}',
+'#pcShab h1{margin:0 0 12px;font-size:44px;font-weight:900;line-height:1.1;color:#FFC629}#pcShab p{margin:0 0 6px;font-size:21px;color:rgba(255,255,255,.85);line-height:1.45}#pcShab p b{color:#fff}',
+'#pcStop.age .big{background:#ffe9a8;box-shadow:0 7px 0 #d9a21c}',
+'#pcStop .gnm{display:inline-block;margin:4px 0 12px;font-size:17px;font-weight:800;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:6px 16px}',
+/* age badge on home tiles, lock badge on the Who's playing tiles */
+'.tile .pcAge{position:absolute;top:10px;right:10px;z-index:2;background:rgba(23,32,74,.88);color:#FFC629;font-weight:900;font-size:14px;line-height:1;border:2px solid rgba(255,198,41,.7);border-radius:999px;padding:5px 10px;box-shadow:0 2px 6px rgba(0,0,0,.35)}',
+'.ptile .pclk{position:absolute;top:8px;left:8px;width:38px;height:38px;border-radius:50%;background:#FFC629;box-shadow:0 2px 0 #C96A00;display:flex;align-items:center;justify-content:center;font-size:18px}',
+/* PIN pad */
+'#pcPin{position:fixed;inset:0;z-index:27;background:rgba(10,14,40,.72);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}',
+'#pcPin .pp{background:#fff;color:#17204A;border-radius:22px;width:360px;max-width:94vw;padding:20px 24px 16px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5)}',
+'#pcPin .lk{width:54px;height:54px;margin:0 auto 6px;border-radius:16px;background:#FFC629;box-shadow:0 3px 0 #C96A00;display:flex;align-items:center;justify-content:center;font-size:28px}',
+'#pcPin h3{margin:0 0 4px;font-size:22px}#pcPin .msg{margin:0 0 10px;font-size:14.5px;color:#5c5677;min-height:20px;line-height:1.35}#pcPin .msg.bad{color:#c62828;font-weight:700}',
+'#pcPin .dots{display:flex;justify-content:center;gap:14px;margin:4px 0 14px}#pcPin .dots i{width:18px;height:18px;border-radius:50%;border:3px solid #c9c1e4;display:block}#pcPin .dots i.f{background:#17204A;border-color:#17204A}',
+'#pcPin .dots.shake{animation:pcsh .4s}@keyframes pcsh{20%,60%{transform:translateX(-9px)}40%,80%{transform:translateX(9px)}}',
+'#pcPin .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}',
+'#pcPin .pad button{font:inherit;font-size:24px;font-weight:800;height:52px;border-radius:14px;border:2px solid #e6e0f5;background:#f7f4ff;color:#17204A;cursor:pointer}',
+'#pcPin .pad button:hover{border-color:#FFC629}#pcPin .pad button.fn{font-size:16px;background:#fff}',
+'#pcPin .lnk{display:flex;justify-content:space-between;margin-top:12px}',
+'#pcPin .lnk button{font:inherit;font-size:14px;font-weight:700;border:0;background:none;color:#5b33c4;cursor:pointer;padding:6px 4px;text-decoration:underline}',
+'#pcPin .lnk button.cx{color:#6b6385;text-decoration:none;background:#eee;border-radius:999px;padding:7px 16px}',
+'#pcPin input.ans{width:100%;font:inherit;font-size:26px;font-weight:800;text-align:center;padding:9px;border-radius:14px;border:2px solid #d9d0f2;color:#17204A;margin:2px 0 12px}',
+'#pcPin input.ans:focus{outline:none;border-color:#7a5cff}#pcPin .q{font-size:30px;font-weight:900;margin:6px 0 10px}',
+'#pcPin .lnk button.go,#pcPin .go{text-decoration:none;font:inherit;font-weight:800;font-size:17px;border:0;border-radius:999px;padding:11px 26px;background:#2dcc70;color:#10261a;cursor:pointer}',
+/* parent panel */
+'#pcPanel{position:fixed;inset:0;z-index:22;display:flex;flex-direction:column;background:radial-gradient(1100px 600px at 50% -10%,#2c3d8f 0%,transparent 65%),#17204A;color:#fff}',
+'#pcPanel .ph{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:14px 26px 10px}',
+'#pcPanel .ph h2{margin:0;font-size:26px;font-weight:900}#pcPanel .ph .sv{font-size:13px;font-weight:700;color:#2dcc70;opacity:0;transition:opacity .3s}#pcPanel .ph .sv.on{opacity:1}',
+'#pcPanel .ph .sp{flex:1}',
+'#pcPanel .ph button{font:inherit;font-weight:800;font-size:14px;border-radius:999px;padding:9px 16px;cursor:pointer;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.1);color:#fff}',
+'#pcPanel .ph button.done{background:#FFC629;color:#17204A;border:0;box-shadow:0 2px 0 #C96A00;font-size:15px;padding:9px 22px}',
+'#pcPanel .pb{flex:1;min-height:0;display:flex;gap:18px;padding:0 26px 18px}',
+'#pcPanel .kids{flex:0 0 238px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:2px}',
+'#pcPanel .kids .kt{display:flex;align-items:center;gap:10px;text-align:left;font:inherit;color:#fff;background:#222d63;border:2px solid rgba(255,255,255,.08);border-radius:16px;padding:8px 10px;cursor:pointer}',
+'#pcPanel .kids .kt:hover{border-color:rgba(255,198,41,.6)}#pcPanel .kids .kt.on{border-color:#FFC629;background:#2c3a7e}',
+'#pcPanel .kids .av{width:42px;height:42px;font-size:26px}',
+'#pcPanel .kids .kn{font-weight:800;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#pcPanel .kids .ks{font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;line-height:1.3}',
+'#pcPanel .kids .kx{min-width:0}',
+'#pcPanel .kids .tip{font-size:12.5px;color:rgba(255,255,255,.55);line-height:1.4;padding:6px 4px}',
+'#pcPanel .card{flex:1;min-width:0;background:#fff;color:#17204A;border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.3)}',
+'#pcPanel .ch{display:flex;align-items:center;gap:12px;padding:14px 20px 8px}',
+'#pcPanel .ch .av{width:48px;height:48px;font-size:30px}#pcPanel .ch h3{margin:0;font-size:22px}#pcPanel .ch .td{font-size:13.5px;color:#5c5677;margin-top:2px}',
+'#pcPanel .ch .sp{flex:1}',
+'#pcPanel .btn{font:inherit;font-weight:800;font-size:14px;border:0;border-radius:999px;padding:9px 16px;cursor:pointer;background:#efeaf9;color:#17204A}',
+'#pcPanel .btn.y{background:#FFC629;box-shadow:0 2px 0 #C96A00}#pcPanel .btn.g{background:#2dcc70;color:#10261a}#pcPanel .btn.r{background:#fde3e3;color:#8a1f1f}',
+'#pcPanel .tabs{display:flex;gap:6px;padding:4px 20px 0;border-bottom:2px solid #eee8fa}',
+'#pcPanel .tabs button{font:inherit;font-weight:800;font-size:15px;border:0;background:none;color:#6b6385;padding:10px 14px;border-radius:12px 12px 0 0;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px}',
+'#pcPanel .tabs button.on{color:#17204A;border-bottom-color:#FFC629;background:#fffaeb}',
+'#pcPanel .tb{flex:1;min-height:0;overflow-y:auto;padding:16px 20px 18px}',
+'#pcPanel .sec{background:#f7f4ff;border-radius:16px;padding:14px 16px;margin-bottom:12px}',
+'#pcPanel .sec h4{margin:0 0 4px;font-size:16px}#pcPanel .sec p{margin:0;font-size:13.5px;color:#5c5677;line-height:1.4}',
+'#pcPanel .step{display:flex;align-items:center;gap:14px;margin:10px 0 6px}',
+'#pcPanel .step .pm{width:48px;height:48px;border-radius:50%;border:0;background:#FFC629;box-shadow:0 3px 0 #C96A00;font-size:26px;font-weight:900;color:#17204A;cursor:pointer;flex:0 0 auto}',
+'#pcPanel .step .pm:disabled{opacity:.35;cursor:default}',
+'#pcPanel .step .val{min-width:190px;text-align:center;font-size:28px;font-weight:900}',
+'#pcPanel .step input[type=range]{flex:1;accent-color:#f0a800;height:28px;min-width:120px}',
+'#pcPanel .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:6px}',
+'#pcPanel .chips button{font:inherit;font-size:13.5px;font-weight:700;border:2px solid #e2dbf3;background:#fff;border-radius:999px;padding:5px 12px;cursor:pointer;color:#17204A}',
+'#pcPanel .chips button.on{border-color:#FFC629;background:#fff3c4}',
+'#pcPanel .sw{display:flex;align-items:center;gap:14px}',
+'#pcPanel .tg{position:relative;width:56px;height:32px;border-radius:999px;border:0;background:#cfc8e2;cursor:pointer;flex:0 0 auto;transition:background .15s}',
+'#pcPanel .tg::after{content:"";position:absolute;left:4px;top:4px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .15s}',
+'#pcPanel .tg.on{background:#2dcc70}#pcPanel .tg.on::after{left:28px}',
+'#pcPanel .ggrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px}',
+'#pcPanel .gc{position:relative;display:flex;flex-direction:column;text-align:left;font:inherit;color:#17204A;background:#fff;border:2px solid #e2dbf3;border-radius:14px;overflow:hidden;cursor:pointer;padding:0}',
+'#pcPanel .gc .gt{position:relative;aspect-ratio:16/6.5;background:#2c3870;display:flex;align-items:center;justify-content:center;font-size:30px;overflow:hidden}',
+'#pcPanel .gc .gt img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}',
+'#pcPanel .gc .gn{display:flex;align-items:center;gap:6px;padding:5px 7px 6px;font-size:12.5px;font-weight:800;line-height:1.18;min-height:38px}',
+'#pcPanel .gc .gn span{flex:1}',
+'#pcPanel .gc .tg{width:42px;height:24px;pointer-events:none}#pcPanel .gc .tg::after{width:18px;height:18px;left:3px;top:3px}#pcPanel .gc .tg.on::after{left:21px}',
+'#pcPanel .gc.off{border-color:#eee;background:#f4f3f7}#pcPanel .gc.off .gt{filter:grayscale(1);opacity:.4}#pcPanel .gc.off .gn{color:#8d88a3}',
+'#pcPanel .gc.on{border-color:#2dcc70}',
+'#pcPanel .gc .ga{position:absolute;top:5px;right:5px;z-index:2;background:rgba(23,32,74,.88);color:#FFC629;font-size:11px;font-weight:900;border-radius:999px;padding:2px 7px}',
+'#pcPanel .gc.age{border-color:#eee;background:#f4f3f7;cursor:default}#pcPanel .gc.age .gt img{filter:grayscale(1);opacity:.4}#pcPanel .gc.age .gn{color:#8d88a3}',
+'#pcPanel .gc .ag{display:block;font-size:11px;font-weight:700;color:#b26a00}',
+'#pcPanel .ages{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}',
+'#pcPanel .ages button{font:inherit;font-size:15px;font-weight:800;min-width:46px;border:2px solid #e2dbf3;background:#fff;border-radius:999px;padding:7px 13px;cursor:pointer;color:#17204A}',
+'#pcPanel .ages button.on{border-color:#FFC629;background:#fff3c4}',
+'#pcPanel .sbav{display:flex;align-items:center;justify-content:center;border-radius:50%;background:#fff3c4;font-size:24px !important}',
+'#pcPanel .kids .sbk{margin-top:6px;border-style:dashed}#pcPanel .kids .sbk .kn{white-space:normal}#pcPanel .kids .sbk.on{border-style:solid}',
+'#pcPanel .sbrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:14.5px;font-weight:700}',
+'#pcPanel .sbt select,#pcPanel .sbt input{font:inherit;font-weight:700;font-size:15px;padding:7px 10px;border-radius:10px;border:2px solid #e2dbf3;color:#17204A;background:#fff}',
+'#pcPanel .sbt select.sbcity{min-width:300px}#pcPanel .sbcus{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;font-size:13.5px;font-weight:700}#pcPanel .sbcus[hidden]{display:none}#pcPanel .sbcus input{width:110px}#pcPanel .sbcus select{max-width:240px}',
+'#pcPanel .sbcus .sbnt{flex-basis:100%;margin:0;font-weight:600}#pcPanel .sbil{display:flex;align-items:center;gap:6px}#pcPanel .sbil input{width:auto}',
+'#pcPanel .sbwk{background:#fff8e1;border:2px solid #FFC629}#pcPanel .sbwk .wkt{font-size:19px;font-weight:900;margin:2px 0 4px}#pcPanel .sbwk .wks{font-size:14.5px;font-weight:700;color:#3d2a8a}#pcPanel .sbwk .nyt{font-size:13.5px;font-weight:700;margin-top:6px}#pcPanel .sbwk .how{margin-top:8px;font-size:12.5px}#pcPanel .sbwk .bad{color:#c62828;font-weight:700}',
+'#pcPanel .kpa{margin-top:8px}#pcPanel .kpa:empty{display:none}',
+'#pcPanel .ahid{margin-top:10px;font-size:13px;color:#5c5677;line-height:1.45}#pcPanel .ahid b{color:#17204A}',
+'#pcPanel .gbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}#pcPanel .gbar .ct{font-weight:800;margin-right:auto}',
+'#pcPanel .bl{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#f7f4ff;border-radius:16px;padding:10px 12px;margin-bottom:10px}',
+'#pcPanel .bl .be{font-size:26px;width:40px;text-align:center}',
+'#pcPanel .bl input.bn{font:inherit;font-weight:800;font-size:15px;width:150px;padding:7px 10px;border-radius:10px;border:2px solid #e2dbf3;color:#17204A}',
+'#pcPanel .bl input[type=time]{font:inherit;font-weight:700;font-size:15px;padding:6px 8px;border-radius:10px;border:2px solid #e2dbf3;color:#17204A}',
+'#pcPanel .bl input:focus{outline:none;border-color:#7a5cff}',
+'#pcPanel .bl .to{font-weight:700;color:#6b6385}',
+'#pcPanel .bl .dd{display:flex;gap:4px}#pcPanel .bl .dd button{font:inherit;font-size:12px;font-weight:800;width:38px;padding:6px 0;border-radius:9px;border:2px solid #e2dbf3;background:#fff;color:#8d88a3;cursor:pointer}',
+'#pcPanel .bl .dd button.on{border-color:#7a5cff;background:#ece6ff;color:#3d2a8a}',
+'#pcPanel .bl .x{margin-left:auto;font:inherit;font-weight:800;font-size:13px;border:0;border-radius:999px;padding:7px 12px;background:#fde3e3;color:#8a1f1f;cursor:pointer}',
+'#pcPanel .bl .nt{flex-basis:100%;font-size:12.5px;color:#6b6385;padding-left:50px;margin-top:-2px}#pcPanel .bl .nt.bad{color:#c62828;font-weight:700}',
+'#pcPanel .addb{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px}',
+'#pcPanel .now{display:inline-block;font-size:12px;font-weight:800;background:#c9d3ff;border-radius:999px;padding:2px 8px;margin-left:6px;vertical-align:2px}',
+''].join("");
+function ensureCss(){ if($("pcCss"))return; var st=document.createElement("style"); st.id="pcCss"; st.textContent=css; document.head.appendChild(st); }
+
+/* ---------- PIN pad ---------- */
+var fails=0, lockUntil=0;
+function closePin(){ var m=$("pcPin"); if(m)m.remove(); document.removeEventListener("keydown",pinKeys,true); }
+var pinKeys=function(){};
+/* mode: "ask" (check PIN), "create" (choose a new one) */
+function pinPad(opts){
+ ensureCss(); closePin();
+ var mode=opts.mode, first=null, entry="";
+ var m=document.createElement("div"); m.id="pcPin"; m.setAttribute("role","dialog"); m.setAttribute("aria-modal","true");
+ m.innerHTML='<div class="pp"><div class="lk">🔒</div><h3></h3><p class="msg"></p><div class="dots"><i></i><i></i><i></i><i></i></div>'+
+  '<div class="pad">'+[1,2,3,4,5,6,7,8,9].map(function(n){return '<button data-n="'+n+'">'+n+'</button>';}).join("")+
+  '<button class="fn" data-n="clr" aria-label="Clear">Clear</button><button data-n="0">0</button><button class="fn" data-n="del" aria-label="Delete">⌫</button></div>'+
+  '<div class="lnk">'+(mode==="ask"&&!opts.noForgot?'<button class="fg">Forgot PIN?</button>':'<span></span>')+'<button class="cx">Cancel</button></div></div>';
+ document.body.appendChild(m);
+ var h=m.querySelector("h3"), msg=m.querySelector(".msg"), dots=m.querySelectorAll(".dots i");
+ function title(){ if(mode==="ask"){ h.textContent=opts.title||"Parents only"; say(opts.why||"Type your 4-digit parent PIN."); }
+  else { h.textContent=first==null?(opts.title||"Create your parent PIN"):"Type it again"; say(first==null?(opts.why||"Choose 4 numbers. You'll need them to open Parent controls. Keep them secret from the children."):"Just to make sure."); } }
+ function say(t,bad){ msg.textContent=t; msg.className="msg"+(bad?" bad":""); }
+ function draw(){ for(var i=0;i<4;i++)dots[i].className=i<entry.length?"f":""; }
+ function shake(){ var d=m.querySelector(".dots"); d.classList.remove("shake"); void d.offsetWidth; d.classList.add("shake"); }
+ function done(){
+  if(mode==="ask"){
+   if(now()<lockUntil){ entry=""; draw(); say("Too many tries. Please wait "+Math.ceil((lockUntil-now())/1000)+" seconds.",true); return; }
+   if(opts.check?opts.check(entry):pinOk(entry)){ fails=0; closePin(); opts.ok&&opts.ok(); return; }
+   fails++; entry=""; draw(); shake();
+   if(fails>=5){ lockUntil=now()+30000; fails=0; say("Too many tries. Please wait 30 seconds.",true); }
+   else say("That's not the right PIN. Please try again.",true);
+   return;
+  }
+  if(first==null){ var no=opts.reject?opts.reject(entry):grownReject(entry); if(no){ entry=""; draw(); shake(); say(no,true); return; }
+   first=entry; entry=""; draw(); title(); return; }
+  if(entry===first){ if(opts.save)opts.save(entry); else setPin(entry); closePin(); opts.ok&&opts.ok(); return; }
+  first=null; entry=""; draw(); shake(); title(); say("The two PINs didn't match. Let's start again.",true);
+ }
+ function press(n){
+  if(n==="del"){ entry=entry.slice(0,-1); draw(); return; }
+  if(n==="clr"){ entry=""; draw(); return; }
+  if(entry.length>=4)return; entry+=n; draw();
+  if(entry.length===4) setTimeout(done,140);
+ }
+ Array.prototype.forEach.call(m.querySelectorAll(".pad button"),function(b){ b.onclick=function(){ press(b.getAttribute("data-n")); }; });
+ m.querySelector(".cx").onclick=function(){ closePin(); opts.cancel&&opts.cancel(); };
+ if(m.querySelector(".fg")) m.querySelector(".fg").onclick=function(){ forgot(opts); };
+ pinKeys=function(e){ if(!$("pcPin")||$("pcPin").querySelector("input.ans"))return;
+  if(/^[0-9]$/.test(e.key)){ e.preventDefault(); e.stopPropagation(); press(e.key); }
+  else if(e.key==="Backspace"){ e.preventDefault(); press("del"); }
+  else if(e.key==="Escape"){ e.preventDefault(); closePin(); opts.cancel&&opts.cancel(); } };
+ document.addEventListener("keydown",pinKeys,true);
+ title(); draw();
+ setTimeout(function(){ try{ m.querySelector('.pad button[data-n="1"]').focus(); }catch(e){} },30);
+}
+/* Forgot PIN (1.0.5, Yossi 15 Oct 2026, option A): the grown-up types the license key that unlocked this PC; a match = choose a
+   new PIN (all settings kept). No internet. Founding customers unlocked without a key keep the old grown-up sum. */
+function forgot(opts){
+ var L=window.PT613_LIC; if(L&&L.hasKey&&L.hasKey()) return forgotKey(opts);
+ return forgotSum(opts);
+}
+function forgotKey(opts){
+ var m=$("pcPin"); if(!m)return;
+ var pp=m.querySelector(".pp");
+ pp.innerHTML='<div class="lk">🔑</div><h3>Forgot your PIN?</h3><p class="msg">Type or paste the license key you used to unlock Playtime613 (it starts with P613-). Then choose a new PIN. Your settings stay as they are.</p>'+
+  '<textarea class="ans key" rows="3" autocomplete="off" spellcheck="false" aria-label="License key" placeholder="P613-..." style="width:100%;box-sizing:border-box;font:13px/1.35 monospace;resize:none;padding:8px 10px;border-radius:10px;border:2px solid #d5dcef;margin:6px 0 4px"></textarea>'+
+  '<div class="lnk"><button class="cx">Cancel</button><button class="go">Check</button></div>';
+ var inp=pp.querySelector(".ans"), msg=pp.querySelector(".msg");
+ function check(){
+  if(window.PT613_LIC.keyMatches(inp.value)){ closePin(); pinPad({mode:"create",title:"Choose a new PIN",ok:function(){ flash("New PIN saved."); opts.ok&&opts.ok(); },cancel:opts.cancel}); return; }
+  msg.textContent="That isn't the license key used on this computer. Check it and try again."; msg.className="msg bad"; inp.select();
+ }
+ pp.querySelector(".go").onclick=check; inp.onkeydown=function(e){ if(e.key==="Enter"){ e.preventDefault(); check(); } if(e.key==="Escape"){ closePin(); opts.cancel&&opts.cancel(); } };
+ pp.querySelector(".cx").onclick=function(){ closePin(); opts.cancel&&opts.cancel(); };
+ setTimeout(function(){ try{inp.focus();}catch(e){} },30);
+}
+/* Fallback (no license key on this PC): a sum most children can't do in their head. */
+function forgotSum(opts){
+ var a=13+Math.floor(Math.random()*17), b=12+Math.floor(Math.random()*13); if(a===b)b++;
+ var m=$("pcPin"); if(!m)return;
+ var pp=m.querySelector(".pp");
+ pp.innerHTML='<div class="lk">🧮</div><h3>Forgot your PIN?</h3><p class="msg">A quick sum for grown-ups. Get it right and you can choose a new PIN. Your settings stay as they are.</p>'+
+  '<div class="q">'+a+' × '+b+' = ?</div><input class="ans" inputmode="numeric" maxlength="4" autocomplete="off" aria-label="Answer">'+
+  '<div class="lnk"><button class="cx">Cancel</button><button class="go">Check</button></div>';
+ var inp=pp.querySelector(".ans"), msg=pp.querySelector(".msg");
+ inp.addEventListener("input",function(){ inp.value=inp.value.replace(/\D/g,""); });
+ function check(){
+  if(+inp.value===a*b&&inp.value!==""){ closePin(); pinPad({mode:"create",title:"Choose a new PIN",ok:function(){ flash("New PIN saved."); opts.ok&&opts.ok(); },cancel:opts.cancel}); return; }
+  msg.textContent="Not quite. Here's another one."; msg.className="msg bad";
+  setTimeout(function(){ if($("pcPin")){ forgot(opts); var m2=$("pcPin").querySelector(".msg"); m2.textContent="Not quite. Here's another one."; m2.className="msg bad"; } },900);
+ }
+ pp.querySelector(".go").onclick=check; inp.onkeydown=function(e){ if(e.key==="Enter")check(); if(e.key==="Escape"){ closePin(); opts.cancel&&opts.cancel(); } };
+ pp.querySelector(".cx").onclick=function(){ closePin(); opts.cancel&&opts.cancel(); };
+ setTimeout(function(){ try{inp.focus();}catch(e){} },30);
+}
+/* a new grown-up PIN must not be a player's own PIN (or that child could open Parent controls) */
+function grownReject(p){ var o=pinOwner(p,null); return o?"That's "+o+"'s PIN. Choose different numbers for the grown-up PIN.":null; }
+/* run fn only after the parent PIN (if a PIN exists) */
+function guard(fn,why){ if(!hasPin()){ fn(); return; } pinPad({mode:"ask",why:why,ok:fn}); }
+function flash(t){ if(A&&A.toast)A.toast(t,3200); }
+
+/* ---------- child screens ---------- */
+function stopScreen(kind,b,g){
+ ensureCss(); closeStop();
+ var pid=A.activeId(), p=pid&&A.getP(pid), nm=p?p.name:"";
+ var m=document.createElement("div"); m.id="pcStop"; m.className=kind==="block"?"blk":kind==="age"?"age":"tup"; m.setAttribute("role","dialog"); m.setAttribute("aria-modal","true");
+ if(kind==="age"){
+  var ga=minAge(g.id);
+  m.innerHTML='<div class="bx"><div class="big">🌱</div><h1>Not for your age yet — ask a grown-up</h1>'+
+   '<div class="gnm">'+esc(g.emoji||"🎮")+' '+esc(g.title)+' · '+esc(ga+"+")+'</div>'+
+   '<p>This game is for children aged '+esc(ga)+' and up. You\'ll be ready for it soon!</p><p>There are lots of other games waiting for you'+(nm?', '+esc(nm):'')+'.</p>'+
+   '<div class="row"><button class="ok">🏠 Back to my games</button><button class="gr">🔒 Grown-up: allow this game</button></div></div>';
+ } else if(kind==="block"){
+  var bn=blockName(b), ends=b&&b.to?b.to:"";
+  m.innerHTML='<div class="bx"><div class="big">'+blockEmoji(b)+'</div><h1>Not now — it\'s '+esc(bn)+'</h1>'+
+   '<p>The games are resting'+(ends?' until <b>'+esc(fmtT(ends))+'</b>':'')+'.</p><p>See you later'+(nm?', '+esc(nm):'')+'!</p>'+
+   '<div class="row"><button class="ok">👍 OK</button><button class="gr">🔒 Grown-up: allow some time</button></div></div>';
+ } else {
+  var u=Math.round(usedSec(pid)/60);
+  m.innerHTML='<div class="bx"><div class="big">🌟</div><div class="stars">⭐⭐⭐</div><h1>Time\'s up for today — well done!</h1>'+
+   '<p>'+(nm?esc(nm)+', you':'You')+' played '+esc(fmtLong(Math.max(1,u)))+' today. Your progress is saved.</p><p>See you tomorrow!</p>'+
+   '<div class="row"><button class="ok">🏠 Back to home</button><button class="gr">🔒 Grown-up: more time</button></div></div>';
+ }
+ document.body.appendChild(m);
+ m.querySelector(".ok").onclick=function(){ closeStop(); refreshHome(); };
+ m.querySelector(".gr").onclick=function(){
+  var who=pid; if(!who)return;
+  if(kind==="age"){ guard(function(){ var d=D(), l=d.ageok[who]||(d.ageok[who]=[]); if(l.indexOf(g.id)<0)l.push(g.id); saveD(d);
+    flash("OK! "+g.title+" is allowed for "+(nm||"this player")+" today."); closeStop(); refreshHome(); if(A.openGame)A.openGame(g); },"Type your PIN to allow "+g.title+" for "+(nm||"this player")+" today."); return; }
+  /* after the PIN the grown-up picks how much: +5 / +10 / +15 / +20 / +30 minutes */
+  guard(function(){
+   var row=m.querySelector(".row"); if(!row)return;
+   row.outerHTML='<div class="xt"><div class="xq">'+(kind==="block"?"How long can "+esc(nm||"this player")+" play now?":"How much more time for "+esc(nm||"this player")+" today?")+'</div>'+
+    '<div class="xb">'+EXTRA.map(function(n){ return '<button data-m="'+n+'">+'+n+' min</button>'; }).join("")+'</div><button class="xc">Cancel</button></div>';
+   Array.prototype.forEach.call(m.querySelectorAll(".xb button"),function(bt){ bt.onclick=function(){ var n=+bt.getAttribute("data-m"); giveTime(who,kind,n); 
+     flash(kind==="block"?"OK! "+n+" minutes of play for "+(nm||"this player")+".":n+" more minutes for "+(nm||"this player")+" today."); closeStop(); refreshHome(); }; });
+   m.querySelector(".xc").onclick=function(){ closeStop(); refreshHome(); };
+   setTimeout(function(){ try{ m.querySelector('.xb button[data-m="15"]').focus(); }catch(e){} },40);
+  }, kind==="block"?"Type your PIN to allow some play time now.":"Type your PIN to give more time today.");
+ };
+ setTimeout(function(){ try{ m.querySelector(".ok").focus(); }catch(e){} },40);
+}
+function closeStop(){ var m=$("pcStop"); if(m)m.remove(); }
+function shabScreen(r){
+ ensureCss(); var tz=r.place.tz, sameDay=Z.localYmd(tz,now())===Z.localYmd(tz,r.until), endsShab=r.days[r.days.length-1].name==="Shabbos";
+ var h=r.kind==="yomtov"?"Good Yom Tov!":r.kind==="both"?"Good Shabbos and Good Yom Tov!":"Good Shabbos!";
+ var u=(endsShab?"Motzei Shabbos":"after Yom Tov")+", <b>"+esc(sbT(r.until,tz,!sameDay,true))+"</b>";
+ var key=r.kind+"|"+r.until, m=$("pcShab"); if(m&&m.getAttribute("data-k")===key)return;
+ if(!m){ m=document.createElement("div"); m.id="pcShab"; m.setAttribute("role","dialog"); m.setAttribute("aria-modal","true"); document.body.appendChild(m); }
+ m.setAttribute("data-k",key);
+ m.innerHTML='<div class="bx"><div class="big">🕯️</div><h1>'+esc(h)+'</h1><p>Playtime613 is resting until '+u+'.</p><p>See you then!</p></div>';
+}
+function shabOff(){ var m=$("pcShab"); if(m)m.remove(); }
+/* ---------- first run: once the app is unlocked and no parent PIN exists yet, ask ONCE "Set up parent controls?" ---------- */
+function setupDue(){
+ if(hasPin()||S.setup||$("pcSetup")||$("pcPin")||$("pcPanel")||$("pcShab")||(A&&A.current()))return false;
+ var L=window.PT613_LIC; if(L){ try{ if(!L.allowed())return false; var st=L._state&&L._state(); if(st&&st.showing)return false; }catch(e){ return false; } }
+ return true;
+}
+function setupPrompt(){
+ if(!setupDue())return; ensureCss();
+ var m=document.createElement("div"); m.id="pcSetup"; m.setAttribute("role","dialog"); m.setAttribute("aria-modal","true"); m.setAttribute("aria-label","Set up parent controls");
+ m.innerHTML='<div class="pp"><div class="lk">🔒</div><h3>Set up parent controls?</h3><p>Choose a PIN, daily time, bedtime and which games each child can play. Takes about 2 minutes.</p>'+
+  '<div class="row"><button class="go">✔ Set up now</button><button class="lt">Maybe later</button></div><p class="sm">You can do it any time with 🔒 Parents.</p></div>';
+ document.body.appendChild(m);
+ function answer(v){ S.setup=v; save(); m.remove(); }
+ m.querySelector(".go").onclick=function(){ answer("done"); openControls(); };
+ m.querySelector(".lt").onclick=function(){ answer("later"); };
+ setTimeout(function(){ try{ m.querySelector(".go").focus(); }catch(e){} },40);
+}
+/* the whole app rests: a game that is open is closed (its save-on-exit runs), the other screens sit underneath */
+function shabCheck(){ var r=shabNow(); if(!r){ shabOff(); return false; }
+ if(A&&A.current()){ graceOff(); var t=$("pcToast"); if(t)t.remove(); A.goHome(); }
+ closeStop(); closePin(); shabScreen(r); return true; }
+var EXTRA=[5,10,15,20,30];
+/* extra time always means n more minutes FROM NOW: if today's play is already past limit+extra (the limit was lowered,
+   or the finish-up minutes ran over), the extra is first raised to cover what was played, so the child really gets n minutes */
+function topUp(d,who,n){ var k=kid(who), b=d.bonus[who]||0; if(k.limit!=null){ var over=Math.ceil((d.used[who]||0)/60)-k.limit; if(over>b)b=over; } d.bonus[who]=b+n; }
+/* block: play is allowed for n minutes from now; time's up: n minutes added to today (and the finish-up grace is fresh again) */
+function giveTime(who,kind,n){ var d=D();
+ if(kind==="block"){ d.allow[who]=now()+n*60000; }
+ else { topUp(d,who,n); delete d.warned["t:"+who]; delete d.grace[who]; }
+ saveD(d); }
+function gameToast(icon,head,sub){
+ var fw=$("fw"); if(!fw)return; var t=$("pcToast");
+ if(!t){ t=document.createElement("div"); t.id="pcToast"; t.setAttribute("role","status"); fw.appendChild(t); }
+ t.innerHTML='<div class="ic">'+icon+'</div><div><b>'+esc(head)+'</b><span>'+esc(sub)+'</span></div><button aria-label="Close">×</button>';
+ t.querySelector("button").onclick=function(){ t.classList.remove("on"); };
+ void t.offsetWidth; t.classList.add("on"); clearTimeout(gameToast.h); gameToast.h=setTimeout(function(){ t.classList.remove("on"); },10000);
+}
+
+/* ---------- the game gate + the clock ---------- */
+function canPlay(g){
+ if(shabCheck())return false;
+ var pid=A.activeId(); if(!pid)return true;
+ var k=kid(pid);
+ if(g&&k.hidden.indexOf(g.id)>=0){ refreshHome(); return false; }
+ if(g&&overAge(pid,g.id)){ stopScreen("age",null,g); return false; }
+ var b=blockNow(pid); if(b){ stopScreen("block",b); return false; }
+ if(remaining(pid)<=0){ stopScreen("tup"); return false; }
+ return true;
+}
+var lastTick=0;
+function tick(){
+ var t=Date.now(), dt=lastTick?Math.min(5000,t-lastTick):0; lastTick=t;
+ if(shabCheck())return;
+ if(!S.setup&&!hasPin())setupPrompt();
+ var pid=A&&A.activeId(); if(!pid)return;
+ var g=A.current();
+ if(g&&document.visibilityState!=="hidden"&&!$("pcStop")){
+  var d=D(); d.used[pid]=(d.used[pid]||0)+dt/1000*speed;
+  saveD(d);
+  var k=kid(pid), rem=remaining(pid), b=blockNow(pid);
+  if(b){ saveD(d); endGame("block",b); return; }
+  if(rem<=0){                                     /* daily time used up: finish-up grace first (blocked times never get one) */
+   var gm=k.grace, gu=d.grace[pid];
+   if(gm>0&&gu==null){ gu=d.grace[pid]=now()+gm*60000; saveD(d); var tt=$("pcToast"); if(tt)tt.classList.remove("on"); }
+   if(gm>0&&now()<gu){ graceBar(gu-now()); bar(0); var pb=$("pcBar"); if(pb)pb.textContent="⏳ Finishing up"; return; }
+   saveD(d); endGame("tup"); return; }
+  if(k.remind&&rem<=300&&!d.warned["t:"+pid]){ d.warned["t:"+pid]=1; saveD(d); gameToast("⏰","5 minutes left — time to finish up!","Get to a good place to stop."); }
+  if(k.remind){ var nb=blockAt(pid,now()+300000), kk; if(nb&&!blockAt(pid,now())){ kk="b:"+pid+":"+blockName(nb)+":"+nb.from; if(!d.warned[kk]){ d.warned[kk]=1; saveD(d); gameToast(blockEmoji(nb),blockName(nb).replace(/^./,function(c){return c.toUpperCase();})+" in 5 minutes — time to finish up!","Get to a good place to stop."); } } }
+  bar(rem);
+ } else if(!g){ homeNote(); }
+}
+function flush(){}
+function graceBar(ms){
+ var fw=$("fw"); if(!fw)return; var e=$("pcGrace"), s=Math.max(0,Math.ceil(ms/1000)), txt="Time to finish up — "+Math.floor(s/60)+":"+z(s%60);
+ if(!e){ e=document.createElement("div"); e.id="pcGrace"; e.setAttribute("role","status");
+  e.innerHTML='<div class="ic">⏳</div><div><b></b><span>Get to a good place to stop. The game will save and close.</span></div>'; fw.appendChild(e); }
+ var bb=e.querySelector("b"); if(bb.textContent!==txt)bb.textContent=txt;
+}
+function graceOff(){ var e=$("pcGrace"); if(e)e.remove(); }
+function endGame(kind,b){ flush(); graceOff(); stopScreen(kind,b); A.goHome(); }
+function bar(rem){
+ var e=$("pcBar"); if(!e){ var bb=$("bar"); if(!bb)return; e=document.createElement("span"); e.id="pcBar"; bb.insertBefore(e,$("bFull")); }
+ if(rem===Infinity){ e.style.display="none"; return; }
+ e.style.display="inline-flex"; e.className=rem<=300?"low":""; e.textContent="⏱ "+fmtLeft(rem)+" left";
+}
+/* home: hide the games this child doesn't have, and a small note about today's time */
+function refreshHome(){
+ if(!A)return; ensureCss(); var pid=A.activeId(), k=pid?kid(pid):null, grid=$("grid"); if(!grid)return;
+ var shown=0;
+ Array.prototype.forEach.call(grid.querySelectorAll(".tile"),function(t){ var id=t.getAttribute("data-id"), off=!!(k&&(k.hidden.indexOf(id)>=0||overAge(pid,id))); t.style.display=off?"none":""; if(!off)shown++;
+  var a=minAge(id), th=t.querySelector(".thumb"), bd=t.querySelector(".pcAge");                 /* "6+" age badge */
+  if(a!=null&&th&&!bd){ bd=document.createElement("span"); bd.className="pcAge"; bd.setAttribute("aria-label","For ages "+a+" and up"); bd.textContent=a+"+"; th.appendChild(bd); } });
+ var em=$("pcEmpty"); if(!shown&&pid){ if(!em){ em=document.createElement("div"); em.id="pcEmpty"; em.className="pcEmpty"; grid.appendChild(em);} em.textContent="No games are switched on for "+((A.getP(pid)||{}).name||"this player")+" yet. Ask a grown-up to pick some in 🔒 Parents."; } else if(em) em.remove();
+ homeNote(); bar(pid?remaining(pid):Infinity);
+}
+function homeNote(){
+ var sub=$("homeSub"); if(!sub)return; var e=$("pcHomeNote"), pid=A.activeId(); var txt="", cls="";
+ if(pid){ var b=blockNow(pid), r=remaining(pid);
+  if(b){ txt=blockEmoji(b)+" Not now: it's "+blockName(b)+(b.to?" until "+fmtT(b.to):""); cls="blk"; }
+  else if(r<=0){ txt="🌟 Time's up for today"; cls="out"; }
+  else if(r!==Infinity){ txt="⏱ "+fmtLeft(r)+" left today"; } }
+ if(!txt){ if(e)e.remove(); return; }
+ if(!e||e.parentNode!==sub){ e=document.createElement("span"); e.id="pcHomeNote"; sub.appendChild(e); }
+ e.className=cls; if(e.textContent!==txt)e.textContent=txt;
+}
+
+/* ---------- Give this player a PIN: picking him on "Who's playing?" needs his own PIN (or the grown-up PIN) ---------- */
+function locked(pid){ var k=pid&&S.kids[pid]; return !!(k&&k.pin&&k.pin.h); }
+/* go(): what picking the player does. No PIN when the player is already the one playing (back to his own games). */
+function choosePlayer(pid,go){
+ if(!locked(pid)||pid===A.activeId()){ go(); return; }
+ var p=A.getP(pid), nm=p?p.name:"this player";
+ pinPad({mode:"ask",title:nm+"'s PIN",why:"Type "+nm+"'s PIN to play. A grown-up's PIN works too.",noForgot:true,check:function(e){ return kidPinOk(pid,e)||pinOk(e); },ok:go});
+}
+
+/* ---------- the parent panel ---------- */
+var sel=null, tab="time", savedT, view="kid";
+function savedFlash(){ var s=document.querySelector("#pcPanel .sv"); if(!s)return; s.classList.add("on"); clearTimeout(savedT); savedT=setTimeout(function(){s.classList.remove("on");},1400); }
+function openControls(){
+ ensureCss();
+ if(!hasPin()){ pinPad({mode:"create",ok:function(){ flash("PIN saved. Keep it safe!"); panel(); }}); return; }
+ pinPad({mode:"ask",why:"Type your 4-digit parent PIN to open Parent controls.",ok:panel});
+}
+function closePanel(){ var p=$("pcPanel"); if(p)p.remove(); if($("home"))$("home").scrollTop=0; refreshHome(); if(A.renderWho)A.renderWho(); }
+function summary(pid){ var k=kid(pid), n=k.hidden.filter(function(id){return A.GAMES.some(function(g){return g.id===id;});}).length, a=[];
+ a.push(k.limit==null?"No daily limit":fmtMin(k.limit)+" a day"); if(n)a.push(n+" game"+(n==1?"":"s")+" hidden"); if(k.blocks.length)a.push(k.blocks.length+" blocked time"+(k.blocks.length==1?"":"s")); if(k.maxAge!=null)a.push(ageTxt(k.maxAge)); if(k.pin)a.push("🔑 Own PIN"); return a.join(" · "); }
+function panel(){
+ ensureCss(); var old=$("pcPanel"); if(old)old.remove(); view="kid";
+ var lic=$("licSet"); if(lic)lic.remove();
+ var ps=A.profiles(); if(!sel||!ps.some(function(p){return p.id===sel;})) sel=(A.activeId()&&ps.some(function(p){return p.id===A.activeId();}))?A.activeId():ps[0].id;
+ var m=document.createElement("div"); m.id="pcPanel"; m.setAttribute("role","dialog"); m.setAttribute("aria-label","Parent controls");
+ m.innerHTML='<div class="ph"><h2>🔒 Parent controls</h2><span class="sv">✓ Saved</span><span class="sp"></span><button class="up">📣 Updates &amp; notes</button><button class="cp">🔑 Change PIN</button><button class="done">✔ Done</button></div>'+
+  '<div class="pb"><div class="kids"></div><div class="card"></div></div>';
+ document.body.appendChild(m);
+ m.querySelector(".done").onclick=closePanel;
+ m.querySelector(".up").onclick=function(){ if(window.PT613_UPD)PT613_UPD.openParent(); };   /* v1.0.5 */
+ m.querySelector(".cp").onclick=function(){ pinPad({mode:"ask",why:"First, type your current PIN.",ok:function(){ pinPad({mode:"create",title:"Choose a new PIN",ok:function(){ flash("New PIN saved."); }}); }}); };
+ m.addEventListener("keydown",function(e){ if(e.key==="Escape"&&!$("pcPin")){ closePanel(); } });
+ drawKids(); drawCard();
+ setTimeout(function(){ try{ m.querySelector(".done").focus(); }catch(e){} },30);
+}
+function drawKids(){
+ var box=document.querySelector("#pcPanel .kids"); if(!box)return; var ps=A.profiles();
+ box.innerHTML=ps.map(function(p){ return '<button class="kt'+(p.id===sel&&view==="kid"?' on':'')+'" data-pid="'+esc(p.id)+'"><span class="av">'+A.avHTML(p.av)+'</span><span class="kx"><div class="kn">'+esc(p.name)+'</div><div class="ks">'+esc(summary(p.id))+'</div></span></button>'; }).join("")+
+  (Z?'<button class="kt sbk'+(view==="shabbos"?' on':'')+'"><span class="av sbav">🕯️</span><span class="kx"><div class="kn">Shabbos & Yom Tov</div><div class="ks">'+esc(sbSummary())+'</div></span></button>':'')+
+  '<div class="tip">'+(ps.length<2?"Only one player so far, so these settings are for everyone. To set each child separately, add a player for each child on the “Who's playing?” screen.":"Each child has their own settings. Children can switch player, but each player's own limits always apply.")+'</div>';
+ Array.prototype.forEach.call(box.querySelectorAll(".kt"),function(b){ b.onclick=function(){ if(b.classList.contains("sbk")){ view="shabbos"; } else { view="kid"; sel=b.getAttribute("data-pid"); } drawKids(); drawCard(); }; });
+}
+function drawCard(){
+ var card=document.querySelector("#pcPanel .card"); if(!card)return; if(view==="shabbos"&&Z){ drawShabbos(card); return; } var p=A.getP(sel); if(!p)return; var k=kid(sel), d=D();
+ var today=todayText(sel);
+ var nOn=A.GAMES.filter(function(g){return k.hidden.indexOf(g.id)<0&&!overAge(sel,g.id);}).length;
+ card.innerHTML='<div class="ch"><span class="av">'+A.avHTML(p.av)+'</span><div><h3>'+esc(p.name)+'</h3><div class="td">'+esc(today)+'</div></div><span class="sp"></span>'+
+  (k.limit!=null?'<button class="btn y plus">+15 minutes today</button>':'')+(usedSec(sel)>0||(d.bonus[sel]||0)?'<button class="btn rs" title="Start today\'s time again from zero">↺ Reset today</button>':'')+'</div>'+
+  '<div class="tabs" role="tablist"><button data-t="time">⏱ Daily time</button><button data-t="games">🎮 Games ('+nOn+' of '+A.GAMES.length+')</button><button data-t="blocks">🌙 Blocked times'+(k.blocks.length?' ('+k.blocks.length+')':'')+'</button><button data-t="lock">🛡️ PIN & age</button></div><div class="tb"></div>';
+ Array.prototype.forEach.call(card.querySelectorAll(".tabs button"),function(b){ b.setAttribute("role","tab"); if(b.getAttribute("data-t")===tab){b.classList.add("on");b.setAttribute("aria-selected","true");} b.onclick=function(){ tab=b.getAttribute("data-t"); drawCard(); }; });
+ if(card.querySelector(".plus")) card.querySelector(".plus").onclick=function(){ var d=D(); topUp(d,sel,15); delete d.warned["t:"+sel]; delete d.grace[sel]; saveD(d); savedFlash(); flash("15 more minutes for "+p.name+" today."); drawCard(); drawKids(); };
+ if(card.querySelector(".rs")) card.querySelector(".rs").onclick=function(){ var d=D(); d.used[sel]=0; d.bonus[sel]=0; delete d.warned["t:"+sel]; delete d.grace[sel]; saveD(d); savedFlash(); drawCard(); };
+ var tb=card.querySelector(".tb");
+ if(tab==="time") drawTime(tb,k); else if(tab==="games") drawGames(tb,k); else if(tab==="lock") drawLock(tb,k); else drawBlocks(tb,k);
+}
+var STEPS=[]; for(var i=10;i<=MAXLIM;i+=10)STEPS.push(i); STEPS.push(null);
+function drawTime(tb,k){
+ var idx=k.limit==null?STEPS.length-1:Math.max(0,STEPS.indexOf(Math.min(MAXLIM,Math.round(k.limit/10)*10)));
+ tb.innerHTML='<div class="sec"><h4>Daily time for '+esc(A.getP(sel).name)+'</h4><p>From 10 minutes up to unlimited. Time only counts while a game is open, and starts again at midnight.</p>'+
+  '<div class="step"><button class="pm mi" aria-label="Less time">−</button><div class="val" aria-live="polite"></div><button class="pm pl" aria-label="More time">+</button>'+
+  '<input type="range" min="0" max="'+(STEPS.length-1)+'" step="1" aria-label="Daily time"></div>'+
+  '<div class="chips">'+[[30,"30 min"],[60,"1 hour"],[90,"1½ hours"],[120,"2 hours"],[null,"Unlimited"]].map(function(c){return '<button data-v="'+c[0]+'">'+c[1]+'</button>';}).join("")+'</div></div>'+
+  '<div class="sec sw"><button class="tg rem" role="switch" aria-label="5-minute reminder"></button><div><h4>5-minute reminder</h4><p>A gentle message over the game when 5 minutes are left (and 5 minutes before a blocked time starts). At zero the game stops and saves, and a friendly “Time\'s up for today — well done!” screen shows.</p></div></div>'+
+  '<div class="sec"><h4>When time is up</h4><p>Let '+esc(A.getP(sel).name)+' finish the round: a “Time to finish up” countdown shows over the game, then it saves and closes. Bedtime, school and other blocked times always stop straight away.</p>'+
+  '<div class="chips gr">'+[[0,"Stop straight away"],[2,"Let them finish (2 min)"],[5,"Let them finish (5 min)"]].map(function(c){return '<button data-g="'+c[0]+'">'+c[1]+'</button>';}).join("")+'</div></div>';
+ var val=tb.querySelector(".val"), rng=tb.querySelector("input[type=range]"), gch=tb.querySelectorAll(".chips.gr button"), mi=tb.querySelector(".mi"), pl=tb.querySelector(".pl"), tg=tb.querySelector(".rem");
+ function show(){ var v=STEPS[idx]; val.textContent=v==null?"Unlimited":fmtMin(v); rng.value=idx; mi.disabled=idx===0; pl.disabled=idx===STEPS.length-1;
+  Array.prototype.forEach.call(tb.querySelectorAll(".chips:not(.gr) button"),function(b){ b.classList.toggle("on",String(b.getAttribute("data-v"))===String(v)); }); }
+ function commit(){ var kk=kid(sel), was=kk.limit==null; kk.limit=STEPS[idx]; setKid(sel,kk); drawKids(); if(was!==(kk.limit==null)){ drawCardHead(); return; } show(); headLine(); }
+ mi.onclick=function(){ if(idx>0){idx--;commit();} }; pl.onclick=function(){ if(idx<STEPS.length-1){idx++;commit();} };
+ rng.oninput=function(){ idx=+rng.value; show(); }; rng.onchange=function(){ idx=+rng.value; commit(); };
+ Array.prototype.forEach.call(tb.querySelectorAll(".chips:not(.gr) button"),function(b){ b.onclick=function(){ var v=b.getAttribute("data-v"); idx=v==="null"?STEPS.length-1:STEPS.indexOf(+v); commit(); }; });
+ function tgs(){ tg.classList.toggle("on",!!kid(sel).remind); tg.setAttribute("aria-checked",kid(sel).remind?"true":"false"); }
+ tg.onclick=function(){ var kk=kid(sel); kk.remind=!kk.remind; setKid(sel,kk); tgs(); };
+ function grs(){ var g=kid(sel).grace; Array.prototype.forEach.call(gch,function(b){ var on=+b.getAttribute("data-g")===g; b.classList.toggle("on",on); b.setAttribute("aria-pressed",on?"true":"false"); }); }
+ Array.prototype.forEach.call(gch,function(b){ b.onclick=function(){ var kk=kid(sel); kk.grace=+b.getAttribute("data-g"); setKid(sel,kk); grs(); }; });
+ show(); tgs(); grs();
+}
+function todayText(pid){ var d=D(), used=Math.round(usedSec(pid)/60), rem=remaining(pid), bn=blockNow(pid);
+ return "Played today: "+(used?fmtMin(used):"nothing yet")+(rem===Infinity?"":" · "+(rem>0?fmtLeft(rem)+" left":"time's up"))+((d.bonus[pid]||0)?" (incl. +"+d.bonus[pid]+" min extra)":"")+(bn?" · "+blockName(bn)+" now":""); }
+function headLine(){ var t=document.querySelector("#pcPanel .ch .td"); if(t)t.textContent=todayText(sel); }
+function drawCardHead(){ /* refresh the "played today" line + buttons without losing the open tab */ var y=document.querySelector("#pcPanel .tb"), st=y?y.scrollTop:0; drawCard(); var y2=document.querySelector("#pcPanel .tb"); if(y2)y2.scrollTop=st; }
+function drawGames(tb,k){
+ tb.innerHTML='<div class="gbar"><span class="ct"></span><button class="btn g all">Show all</button><button class="btn none">Hide all</button></div>'+
+  '<p style="margin:-6px 0 10px;font-size:13px;color:#5c5677">Tap a game to switch it on or off for '+esc(A.getP(sel).name)+'. Games that are off don\'t show on their home screen. New games start switched on. Greyed games are over the age limit (🛡️ PIN & age).</p><div class="ggrid"></div>';
+ var gg=tb.querySelector(".ggrid");
+ gg.innerHTML=A.GAMES.map(function(g){ var on=k.hidden.indexOf(g.id)<0, a=minAge(g.id), oa=overAge(sel,g.id);
+  return '<button class="gc '+(oa?'age':on?'on':'off')+'" data-id="'+esc(g.id)+'" role="switch" aria-checked="'+(on&&!oa)+'"'+(oa?' title="Over the age limit: change it in PIN &amp; age"':'')+'><div class="gt">'+esc(g.emoji||"🎮")+'<img alt="" src="games/'+esc(g.id)+'/thumb.jpg" onerror="this.remove()">'+(a!=null?'<span class="ga">'+a+'+</span>':'')+'</div>'+
+   '<div class="gn"><span>'+esc(g.title)+(oa?'<i class="ag">Hidden: age '+a+'+</i>':'')+'</span><i class="tg'+(on&&!oa?' on':'')+'"></i></div></button>'; }).join("");
+ function count(){ var kk=kid(sel), n=A.GAMES.filter(function(g){return kk.hidden.indexOf(g.id)<0&&!overAge(sel,g.id);}).length; tb.querySelector(".ct").textContent=n+" of "+A.GAMES.length+" games on"; var t=document.querySelector('#pcPanel .tabs button[data-t="games"]'); if(t)t.textContent="🎮 Games ("+n+" of "+A.GAMES.length+")"; }
+ function setAll(on){ var kk=kid(sel); kk.hidden=on?[]:A.GAMES.map(function(g){return g.id;}); setKid(sel,kk); drawGames(tb,kk); drawKids(); }
+ tb.querySelector(".all").onclick=function(){ setAll(true); }; tb.querySelector(".none").onclick=function(){ setAll(false); };
+ Array.prototype.forEach.call(gg.querySelectorAll(".gc"),function(b){ b.onclick=function(){
+  var id=b.getAttribute("data-id"), kk=kid(sel), i=kk.hidden.indexOf(id);
+  if(overAge(sel,id)){ tab="lock"; drawCard(); return; }                                    /* over the age limit: the age setting decides */
+  if(i>=0)kk.hidden.splice(i,1); else kk.hidden.push(id); setKid(sel,kk);
+  var on=kk.hidden.indexOf(id)<0; b.className="gc "+(on?"on":"off"); b.setAttribute("aria-checked",on); b.querySelector(".tg").className="tg"+(on?" on":""); count(); drawKids(); }; });
+ count();
+}
+function drawLock(tb,k){
+ var nm=esc(A.getP(sel).name), one=A.profiles().length<2;
+ tb.innerHTML='<div class="sec sw"><button class="tg lkp" role="switch" aria-label="Give this player a PIN"></button><div><h4>Give this player a PIN</h4><p>When this is on, '+nm+' types his own 4-digit PIN to play as himself on the “Who\'s playing?” screen, so a brother can\'t use his player to get his time or games. Your grown-up PIN always works too.'+(one?' He is the only player, so a PIN will be needed each time the app opens.':'')+'</p>'+
+  '<div class="kpa"></div></div></div>'+
+  '<div class="sec"><h4>Show games for ages up to</h4><p>Games for older children are hidden from '+nm+'\'s home screen. If he finds one, he sees a kind “Not for your age yet — ask a grown-up” screen, and you can allow it with your PIN.</p>'+
+  '<div class="ages" role="radiogroup" aria-label="Show games for ages up to">'+AGE_STEPS.map(function(a){ return '<button role="radio" data-a="'+(a==null?"all":a)+'">'+(a==null?"All":a)+'</button>'; }).join("")+'</div><div class="ahid" aria-live="polite"></div></div>';
+ var tg=tb.querySelector(".lkp"), who=sel, raw=A.getP(sel).name;
+ function childPin(title,done){ pinPad({mode:"create",title:title,why:"4 numbers just for "+raw+". Not the same as your grown-up PIN.",
+   reject:function(p){ if(pinOk(p))return "That's your grown-up PIN. Choose different numbers for "+raw+"."; var o=pinOwner(p,who); return o?"That's "+o+"'s PIN. Choose different numbers for "+raw+".":null; },
+   save:function(p){ setKidPin(who,p); }, ok:function(){ flash(raw+"'s PIN is saved."); tgs(); drawKids(); }, cancel:tgs }); }
+ function tgs(){ var on=!!kid(sel).pin; tg.classList.toggle("on",on); tg.setAttribute("aria-checked",on?"true":"false");
+  var a=tb.querySelector(".kpa"); a.innerHTML=on?'<button class="btn kch">🔑 Change '+nm+'\'s PIN</button>':'';
+  if(on)a.querySelector(".kch").onclick=function(){ childPin("New PIN for "+raw); }; }
+ tg.onclick=function(){ var kk=kid(sel); if(kk.pin){ kk.pin=null; setKid(sel,kk); tgs(); drawKids(); } else childPin("Choose a PIN for "+raw); };
+ function ages(){ var kk=kid(sel);
+  Array.prototype.forEach.call(tb.querySelectorAll(".ages button"),function(b){ var on=b.getAttribute("data-a")===(kk.maxAge==null?"all":String(kk.maxAge)); b.classList.toggle("on",on); b.setAttribute("aria-checked",on?"true":"false"); });
+  var hid=A.GAMES.filter(function(g){ var a=minAge(g.id); return kk.maxAge!=null&&a!=null&&a>kk.maxAge; });
+  tb.querySelector(".ahid").innerHTML=kk.maxAge==null?"All games show (each game still follows the Games tab).":hid.length?"<b>Hidden for "+nm+" at this age ("+hid.length+"):</b> "+hid.map(function(g){return esc(g.title)+" ("+minAge(g.id)+"+)";}).join(", ")+".":"Every game is fine for this age.";
+ }
+ Array.prototype.forEach.call(tb.querySelectorAll(".ages button"),function(b){ b.onclick=function(){ var kk=kid(sel), v=b.getAttribute("data-a"); kk.maxAge=v==="all"?null:+v; setKid(sel,kk); ages(); drawKids();
+  var t=document.querySelector('#pcPanel .tabs button[data-t="games"]'); if(t)t.textContent="🎮 Games ("+A.GAMES.filter(function(g){return kk.hidden.indexOf(g.id)<0&&!overAge(sel,g.id);}).length+" of "+A.GAMES.length+")"; }; });
+ tgs(); ages();
+}
+function sbSummary(){ var c=sbCfg(), p=sbPlace(); return c.on?("Lock on · "+(p?p.name:"set your place")):"Lock off"; }
+/* Shabbos & Yom Tov card (whole computer, every player) */
+function drawShabbos(card){
+ var c=sbCfg(), ks=Object.keys(Z.CITIES), tzs=[];
+ ks.forEach(function(k){ var t=Z.CITIES[k][3]; if(tzs.indexOf(t)<0)tzs.push(t); });
+ try{ if(Intl.supportedValuesOf)Intl.supportedValuesOf("timeZone").forEach(function(t){ if(tzs.indexOf(t)<0)tzs.push(t); }); }catch(e){}
+ if(c.tz&&tzs.indexOf(c.tz)<0)tzs.push(c.tz);
+ var opt=function(v,t,on){ return '<option value="'+esc(v)+'"'+(on?' selected':'')+'>'+esc(t)+'</option>'; };
+ card.innerHTML='<div class="ch"><span class="av sbav">🕯️</span><div><h3>Shabbos & Yom Tov</h3><div class="td">For every player on this computer</div></div><span class="sp"></span></div>'+
+  '<div class="tb sbt">'+
+  '<div class="sec sw"><button class="tg sbon" role="switch" aria-label="Shabbos and Yom Tov lock"></button><div><h4>Shabbos & Yom Tov lock</h4><p>Playtime613 won\'t open from a little before candle lighting until after Shabbos or Yom Tov is out. No PIN can open it, so if you ever need to turn it off, do it here before Shabbos. The times are worked out on this computer, no internet needed.</p></div></div>'+
+  '<div class="sec"><h4>Your location</h4><div class="sbrow"><select class="sbcity" aria-label="Your location">'+ks.map(function(k){ return opt(k,Z.CITIES[k][0]+(Z.CITIES[k][5]?" (Israel)":""),c.city===k); }).join("")+opt("custom","Other place (enter it)…",c.city==="custom")+'</select></div>'+
+  '<div class="sbcus"'+(c.city==="custom"?'':' hidden')+'><label>Latitude <input class="sblat" inputmode="decimal" placeholder="51.51" value="'+esc(c.lat==null?"":c.lat)+'"></label><label>Longitude <input class="sblon" inputmode="decimal" placeholder="-0.13" value="'+esc(c.lon==null?"":c.lon)+'"></label>'+
+  '<label>Time zone <select class="sbtz">'+tzs.map(function(t){ return opt(t,t,c.tz===t); }).join("")+'</select></label><label class="sbil"><input type="checkbox" class="sbis"'+(c.israel?' checked':'')+'> In Israel (1 day Yom Tov)</label><p class="sbnt">Latitude: north is +, south is −. Longitude: east is +, west is −.</p></div></div>'+
+  '<div class="sec"><h4>Safety margin</h4><div class="sbrow">Start <select class="sbbf" aria-label="Minutes before candle lighting">'+SB_MARGINS.map(function(n){return opt(n,n,+c.before===n);}).join("")+'</select> minutes before candle lighting, end <select class="sbaf" aria-label="Minutes after nightfall">'+SB_MARGINS.map(function(n){return opt(n,n,+c.after===n);}).join("")+'</select> minutes after nightfall.</div></div>'+
+  '<div class="sec sbwk" aria-live="polite"></div></div>';
+ var tg=card.querySelector(".sbon");
+ function save(){ S.shabbos=c; save_(); }
+ function save_(){ localStorage.setItem(KEY,JSON.stringify(S)); savedFlash(); drawKids(); week(); }
+ function tgs(){ tg.classList.toggle("on",c.on); tg.setAttribute("aria-checked",c.on?"true":"false"); }
+ function week(){
+  var w=card.querySelector(".sbwk"), p=Z.place(c);
+  if(!p){ w.innerHTML='<h4>This week</h4><p class="bad">Type the latitude, longitude and time zone of your place to see the times.</p>'; return; }
+  var r=Z.nextRun(now(),p), y=Z.nextYomTov(now(),p), tz=p.tz, ln=function(r){ return "candle lighting "+sbT(r.candles,tz,true)+", ends "+sbT(r.end,tz,true,true); };
+  var nm=function(r){ var a=[]; r.days.forEach(function(d){ if(a.indexOf(d.name)<0)a.push(d.name); }); return a.join(" & "); };
+  w.innerHTML='<h4>'+(r&&r.kind!=="shabbos"?esc(nm(r)):"This week")+'</h4>'+(r?'<div class="wkt">'+esc(ln(r).replace(/^c/,"C"))+' ('+esc(p.name)+')</div>'+
+   '<div class="wks">Playtime613 rests '+esc(sbT(r.candles-c.before*60000,tz,true))+' → '+esc(sbT(r.end+c.after*60000,tz,true,true))+(c.on?'':' (when the lock is on)')+'</div>':'')+
+   (y&&(!r||y.eve!==r.eve)?'<div class="nyt">Next Yom Tov, '+esc(nm(y))+': '+esc(ln(y))+'</div>':'')+
+   '<p class="how">Candle lighting is sunset minus '+p.candle+' minutes'+(p.key==="jerusalem"?" (Jerusalem custom)":p.israel?" (as in Israel)":"")+'. The end is nightfall, when the sun is 8.5° below the horizon. Yom Tov is '+(p.israel?'1 day (Israel)':'2 days (outside Israel)')+'. Times shown are '+esc(p.name)+' time.</p>';
+ }
+ tg.onclick=function(){ c.on=!c.on; save(); tgs(); };
+ card.querySelector(".sbcity").onchange=function(){ c.city=this.value; card.querySelector(".sbcus").hidden=c.city!=="custom"; if(c.city==="custom"&&!c.tz)c.tz=card.querySelector(".sbtz").value; save(); };
+ card.querySelector(".sblat").onchange=function(){ c.lat=this.value.trim()===""?null:+this.value.replace(",","."); save(); };
+ card.querySelector(".sblon").onchange=function(){ c.lon=this.value.trim()===""?null:+this.value.replace(",","."); save(); };
+ card.querySelector(".sbtz").onchange=function(){ c.tz=this.value; save(); };
+ card.querySelector(".sbis").onchange=function(){ c.israel=this.checked; save(); };
+ card.querySelector(".sbbf").onchange=function(){ c.before=+this.value; save(); };
+ card.querySelector(".sbaf").onchange=function(){ c.after=+this.value; save(); };
+ tgs(); week();
+}
+var PRESETS={bed:{name:"Bedtime",from:"19:30",to:"07:00",days:[0,1,2,3,4,5,6]},school:{name:"School",from:"08:30",to:"16:00",days:[1,2,3,4,5]},other:{name:"Supper",from:"17:30",to:"18:30",days:[0,1,2,3,4,5,6]}};
+function drawBlocks(tb,k){
+ var nowB=blockAt(sel,now());
+ tb.innerHTML='<p style="margin:0 0 12px;font-size:13.5px;color:#5c5677">During a blocked time '+esc(A.getP(sel).name)+' sees a friendly “Not now — it\'s Bedtime” screen instead of the games. A time can run past midnight (e.g. 19:30 to 07:00). Untick days to use it only on some days.</p><div class="bls"></div>'+
+  (k.blocks.length<MAXBLOCKS?'<div class="addb"><b style="font-size:14px;margin-right:4px">Add:</b><button class="btn" data-p="bed">🌙 Bedtime</button><button class="btn" data-p="school">🏫 School hours</button><button class="btn" data-p="other">＋ Another time</button></div>':'<p style="font-size:13px;color:#6b6385">That\'s the most blocked times for one player.</p>')+
+  (k.blocks.length?'':'<p style="margin:12px 0 0;font-size:14px;color:#6b6385">No blocked times yet: '+esc(A.getP(sel).name)+' can play at any hour (within the daily time).</p>');
+ var bls=tb.querySelector(".bls");
+ k.blocks.forEach(function(b,ix){
+  var f=mins(b.from), e=mins(b.to), bad=f==null||e==null||f===e, days=(b.days&&b.days.length)?b.days:[0,1,2,3,4,5,6];
+  var r=document.createElement("div"); r.className="bl";
+  r.innerHTML='<span class="be">'+blockEmoji(b)+'</span><input class="bn" maxlength="22" aria-label="Name" value="'+esc(b.name||"")+'" placeholder="Name (e.g. Bedtime)">'+
+   '<input type="time" class="fr" aria-label="From" value="'+esc(b.from||"")+'"><span class="to">to</span><input type="time" class="tt" aria-label="Until" value="'+esc(b.to||"")+'">'+
+   '<span class="dd">'+DAYS.map(function(dn,di){return '<button data-d="'+di+'" class="'+(days.indexOf(di)>=0?'on':'')+'" aria-pressed="'+(days.indexOf(di)>=0)+'">'+dn+'</button>';}).join("")+'</span>'+
+   '<button class="x" aria-label="Remove">✕ Remove</button>'+
+   '<div class="nt'+(bad?' bad':'')+'">'+(bad?"Please pick a start and an end time that are different.":esc(fmtT(b.from))+" to "+esc(fmtT(b.to))+(f>e?" (runs past midnight)":"")+", "+esc(daysTxt(b)))+(nowB===b?'<span class="now">ON NOW</span>':'')+'</div>';
+  bls.appendChild(r);
+  function upd(fn){ var kk=kid(sel); fn(kk.blocks[ix]); setKid(sel,kk); }
+  r.querySelector(".bn").onchange=function(){ var v=this.value.replace(/\s+/g," ").trim(); upd(function(x){x.name=v||"Blocked time";}); drawBlocks(tb,kid(sel)); drawKids(); };
+  r.querySelector(".fr").onchange=function(){ var v=this.value; if(!v)return; upd(function(x){x.from=v;}); drawBlocks(tb,kid(sel)); };
+  r.querySelector(".tt").onchange=function(){ var v=this.value; if(!v)return; upd(function(x){x.to=v;}); drawBlocks(tb,kid(sel)); };
+  Array.prototype.forEach.call(r.querySelectorAll(".dd button"),function(db){ db.onclick=function(){ var di=+db.getAttribute("data-d"); var kk=kid(sel), x=kk.blocks[ix], ds=(x.days&&x.days.length)?x.days.slice():[0,1,2,3,4,5,6], j=ds.indexOf(di);
+   if(j>=0){ if(ds.length===1){ flash("Keep at least one day ticked (or remove the time)."); return; } ds.splice(j,1); } else ds.push(di); ds.sort(); x.days=ds; setKid(sel,kk); drawBlocks(tb,kk); }; });
+  r.querySelector(".x").onclick=function(){ var kk=kid(sel); kk.blocks.splice(ix,1); setKid(sel,kk); drawBlocks(tb,kk); drawKids(); updTab(); };
+ });
+ Array.prototype.forEach.call(tb.querySelectorAll(".addb button"),function(ab){ ab.onclick=function(){ var kk=kid(sel), pr=JSON.parse(JSON.stringify(PRESETS[ab.getAttribute("data-p")]));
+  if(kk.blocks.length>=MAXBLOCKS)return; kk.blocks.push(pr); setKid(sel,kk); drawBlocks(tb,kk); drawKids(); updTab(); }; });
+ function updTab(){ var t=document.querySelector('#pcPanel .tabs button[data-t="blocks"]'), n=kid(sel).blocks.length; if(t)t.textContent="🌙 Blocked times"+(n?" ("+n+")":""); }
+}
+
+/* ---------- entry points: home footer, "Who's playing?" footer, Settings ---------- */
+function addEntry(){
+ var f=document.querySelector("#home footer"), ver=$("ver");
+ if(f&&!$("bParents")){ var b=document.createElement("button"); b.id="bParents"; b.title="Parent controls (PIN)"; b.textContent="🔒 Parents"; b.onclick=openControls; f.insertBefore(b,$("bSettings")||ver||null); }
+ var w=document.querySelector("#who .wfoot");
+ if(w&&!$("bParents2")){ var c=document.createElement("button"); c.id="bParents2"; c.textContent="🔒 Parents"; c.title="Parent controls (PIN)";
+  c.style.cssText="font:inherit;font-weight:700;font-size:13px;color:#fff;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:6px 14px;cursor:pointer;margin-left:12px";
+  c.onclick=openControls; w.appendChild(c); }
+ /* 1.0.5 (2026-10-15): the home footer sits below every game, so parents couldn't find it ("Parents disappeared").
+    Also put "🔒 Parents" at the top of Home, beside "Switch player", same pill style (.who-chip button). */
+ var chip=$("whoChip");
+ if(chip&&!$("bParentsTop")){ var t=document.createElement("button"); t.id="bParentsTop"; t.title="Parent controls (PIN)"; t.textContent="🔒 Parents";
+  t.onclick=openControls; chip.insertBefore(t,$("bSwitch")||null); }
+}
+function settingsHook(){
+ var mo=new MutationObserver(function(){
+  var s=$("licSet"); if(!s||s.querySelector(".pcSet"))return; var sc=s.querySelector(".sc"); if(!sc)return; var rows=sc.querySelectorAll(".row"), last=rows[rows.length-1];
+  var d=document.createElement("div"); d.className="pcSet"; d.innerHTML='<h4>Parents</h4><p class="small" style="margin:0 0 8px">Daily time, which games each child sees, blocked times and the 5-minute reminder. Locked with your own PIN.</p><div class="row" style="margin-top:0"><button class="pri" id="sParents">🔒 Parent controls</button></div>';
+  sc.insertBefore(d,last||null); d.querySelector("#sParents").onclick=function(){ s.remove(); openControls(); };
+ });
+ mo.observe(document.body,{childList:true});
+}
+
+/* ---------- the app hands us its API ---------- */
+function attach(api){
+ A=api; ensureCss(); addEntry(); settingsHook(); refreshHome(); shabCheck();
+ setInterval(tick,1000);
+ setInterval(function(){ if(A&&!A.current()&&$("home")&&$("home").style.display!=="none") homeNote(); },15000);
+ window.addEventListener("beforeunload",flush);
+ document.addEventListener("visibilitychange",function(){ lastTick=Date.now(); flush(); });
+}
+/* Restore must not undo or replace the parent's current controls or today's time: the controls on this computer always win */
+function keepAcross(fn){ var a=localStorage.getItem(KEY), b=localStorage.getItem(DAYKEY); try{ fn(); } finally { if(a)localStorage.setItem(KEY,a); if(b)localStorage.setItem(DAYKEY,b); S=load(); } }
+function forgetPlayer(pid){ if(S.kids[pid]){ delete S.kids[pid]; save(); } }
+window.PT613_PC={
+ attach:attach, canPlay:canPlay, started:function(g){ lastTick=Date.now(); var pid=A.activeId(); bar(pid?remaining(pid):Infinity);
+   var d=D(), k=pid&&kid(pid), r=pid?remaining(pid):Infinity; if(k&&k.remind&&r<=300&&r>0&&!d.warned["t:"+pid]){ d.warned["t:"+pid]=1; saveD(d); setTimeout(function(){gameToast("⏰","Only "+fmtLeft(r)+" left today — time to finish up!","Get to a good place to stop.");},1200); } },
+ stopped:function(){ flush(); var t=$("pcToast"); if(t)t.remove(); graceOff(); refreshHome(); },
+ refreshHome:refreshHome, guard:guard, hasPin:hasPin, open:openControls, keepAcross:keepAcross, forgetPlayer:forgetPlayer,
+ locked:locked, choosePlayer:choosePlayer, minAge:minAge,
+ reload:function(){ S=load(); refreshHome(); }
+};
+if(TEST){
+ window.PT613_PC.test={
+  setNow:function(iso){ clockOff=iso?Date.parse(iso)-Date.now():0; tick(); refreshHome(); return new Date(now()).toString(); },
+  setUsed:function(pid,sec){ var d=D(); d.used[pid]=sec; saveD(d); refreshHome(); },
+  speed:function(n){ speed=n||1; }, state:function(){ return {S:S,D:D(),now:new Date(now()).toString()}; },
+  remaining:function(pid){ return remaining(pid); }, blockNow:function(pid){ return blockNow(pid); },
+  overAge:function(pid,id){ return overAge(pid,id); }, grace:function(pid){ return D().grace[pid]||null; },
+  shabAt:function(iso,cfg){ var r=Z&&Z.lockAt(Date.parse(iso),cfg||sbCfg()); return r?{kind:r.kind,days:r.days.map(function(d){return d.date+" "+d.name;}),start:r.start,until:r.until}:null; },
+  shabGaps:function(fromIso,toIso,stepMin,cfg){ var n=0,t=Date.parse(fromIso),e=Date.parse(toIso); for(;t<=e;t+=stepMin*60000){ if(!Z.lockAt(t,cfg||sbCfg()))n++; } return n; }, ages:function(){ return MIN_AGE; }
+ };
+}
+})();
