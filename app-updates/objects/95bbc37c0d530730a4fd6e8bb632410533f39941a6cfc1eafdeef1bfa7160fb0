@@ -1,0 +1,107 @@
+/* Playtime613 recorded sound effects (v1.0.4). Injected after the game's own scripts.
+   Plays short recorded clips from ../_sfx/ and falls back to the game's original
+   sound function if a clip is missing or not decoded yet. No network, no storage. */
+(function(){
+if(window.PT613SFX)return;
+var BASE='../_sfx/',ctx=null,master=null,bufs={},loading={},failed={},last={};
+function getCtx(){if(!ctx){try{var C=window.AudioContext||window.webkitAudioContext;if(!C)return null;ctx=new C();master=ctx.createGain();master.gain.value=0.5;master.connect(ctx.destination);}catch(e){ctx=null;return null;}}
+ if(ctx.state==='suspended'){try{ctx.resume();}catch(e){}}return ctx;}
+function load(n){if(bufs[n]||failed[n])return;if(loading[n])return;var c=getCtx();if(!c||!window.fetch){failed[n]=1;return;}
+ loading[n]=1;window.PT613SFX.fetches++;
+ fetch(BASE+n+'.mp3').then(function(r){if(!r.ok)throw new Error('missing');return r.arrayBuffer();})
+ .then(function(ab){return new Promise(function(res,rej){try{var p=c.decodeAudioData(ab,res,rej);if(p&&p.then)p.then(res,rej);}catch(e){rej(e);}});})
+ .then(function(b){bufs[n]=b;window.PT613SFX.decoded++;}).catch(function(){failed[n]=1;});}
+function play(n,o){o=o||{};var b=bufs[n];if(!b){load(n);return false;}var c=getCtx();if(!c||c.state!=='running')return false;
+ var now=c.currentTime,gap=(o.gap==null?0.04:o.gap);if(last[n]!=null&&now-last[n]<gap&&now>=last[n])return true;last[n]=now;
+ try{var s=c.createBufferSource();s.buffer=b;if(o.rate)s.playbackRate.value=o.rate;var g=c.createGain();g.gain.value=(o.vol==null?1:o.vol);
+  s.connect(g);g.connect(master);var t=now+(o.delay||0);s.start(t);if(o.dur){g.gain.setTargetAtTime(0,t+o.dur,0.04);s.stop(t+o.dur+0.3);}
+  window.PT613SFX.played++;window.PT613SFX.lastName=n;return true;}catch(e){return false;}}
+function loop(n,vol){var b=bufs[n];if(!b){load(n);return null;}var c=getCtx();if(!c)return null;
+ try{var s=c.createBufferSource();s.buffer=b;s.loop=true;var g=c.createGain();g.gain.setValueAtTime(0,c.currentTime);g.gain.linearRampToValueAtTime(vol==null?0.6:vol,c.currentTime+0.08);
+  s.connect(g);g.connect(master);s.start();window.PT613SFX.played++;window.PT613SFX.lastName=n;
+  return {stop:function(){try{g.gain.setTargetAtTime(0,c.currentTime,0.05);s.stop(c.currentTime+0.3);}catch(e){}}};}catch(e){return null;}}
+/* wrap(obj,key,spec,isMuted): spec = clip name | {n,vol,rate,gap} | function(args)->spec|null|'skip' */
+function wrap(obj,key,spec,isMuted){try{if(!obj||typeof obj[key]!=='function'||obj[key].__pt613)return false;}catch(e){return false;}
+ var orig=obj[key];var w=function(){var self=this,args=arguments;
+  try{if(isMuted&&isMuted())return orig.apply(self,args);
+   var sp=(typeof spec==='function')?spec.apply(self,args):spec;
+   if(sp==='skip')return;
+   if(sp){if(typeof sp==='string')sp={n:sp};if(play(sp.n,sp))return;}
+  }catch(e){}
+  return orig.apply(self,args);};
+ w.__pt613=1;w.__orig=orig;obj[key]=w;window.PT613SFX.wrapped.push(key);return true;}
+function preload(list){for(var i=0;i<list.length;i++)load(list[i]);}
+function wake(){var c=getCtx();if(c&&c.state==='suspended'){try{c.resume();}catch(e){}}}
+try{window.addEventListener('pointerdown',wake,true);window.addEventListener('keydown',wake,true);window.addEventListener('touchstart',wake,{capture:true,passive:true});}catch(e){}
+window.PT613SFX={_ctx:function(){return ctx;},hooked:0,play:play,loop:loop,wrap:wrap,preload:preload,load:load,ready:function(n){return !!bufs[n];},fetches:0,decoded:0,played:0,lastName:'',wrapped:[]};
+})();
+
+/* hookOsc: for games whose sound code is sealed inside a closure. Recognises the
+   game's own oscillator/noise calls by signature (frequency, wave, length) on the
+   game's AudioContext, silences that synth note and plays the recorded clip instead.
+   If the game is muted it creates no oscillators, so nothing plays. */
+(function(){
+var P=window.PT613SFX;if(!P||P.hookOsc)return;
+P.hookOsc=function(cfg){
+ var BAC=window.BaseAudioContext||window.AudioContext||window.webkitAudioContext;
+ if(!BAC||!BAC.prototype||!BAC.prototype.createOscillator||BAC.prototype.createOscillator.__pt613)return false;
+ var pad=cfg.pad||0,rules=cfg.rules||[],nrules=cfg.noise||[],hush=[],recent=[];
+ var vdesc=null;try{vdesc=Object.getOwnPropertyDescriptor(AudioParam.prototype,'value');}catch(e){}
+ function own(c){return P._ctx&&c===P._ctx();}
+ function fm(rf,f){if(f==null)return false;if(typeof rf==='number')return Math.abs(f-rf)<0.6;return f>=rf[0]-0.6&&f<=rf[1]+0.6;}
+ function hushed(f,isNoise,now){for(var i=hush.length-1;i>=0;i--){var h=hush[i];if(now>h.until){hush.splice(i,1);continue;}
+   if(isNoise){if(h.noise)return true;continue;} if(!h.f)return true;for(var j=0;j<h.f.length;j++)if(fm(h.f[j],f))return true;}return false;}
+ function fire(r,delay,node){var sp=r.s;if(typeof sp==='function')sp=sp(r.__f);if(typeof sp==='string')sp={n:sp};
+   if(!sp||!P.ready(sp.n))return false;var o={};for(var k in sp)o[k]=sp[k];o.delay=Math.max(0,delay||0);
+   if(!P.play(o.n,o))return false;try{node.disconnect();}catch(e){}
+   var now=Date.now();if(r.h){hush.push({until:now+r.h,f:r.hf||null,noise:r.hn!==false});}
+   if(r.kn){for(var i=0;i<recent.length;i++){if(now-recent[i].t<40){try{recent[i].n.disconnect();}catch(e){}}}}
+   P.hooked++;return true;}
+ function decide(node,gctx,rec,stopT,isNoise){var now=Date.now();P.dbg=[rec.f,rec.type,rec.start,stopT,gctx.currentTime,isNoise];
+   var startT=rec.start==null?gctx.currentTime:rec.start,dur=(stopT==null?0:stopT-startT),delay=startT-gctx.currentTime;
+   if(!isNoise&&hushed(rec.f,false,now)&&delay<1.5){try{node.disconnect();}catch(e){}return;}
+   if(delay>0.03)return;
+   var list=isNoise?nrules:rules;
+   for(var i=0;i<list.length;i++){var r=list[i];
+     if(isNoise){if(Math.abs(dur-(cfg.npad||0)-r.d)<0.006){fire(r,delay,node);return;}continue;}
+     if(r.t&&r.t!==rec.type)continue;if(!fm(r.f,rec.f))continue;
+     if(r.d!=null&&Math.abs(dur-pad-r.d)>0.006)continue;
+     r.__f=rec.f;fire(r,delay,node);return;}}
+ var oc=BAC.prototype.createOscillator;
+ BAC.prototype.createOscillator=function(){var o=oc.apply(this,arguments);var g=this;if(own(g))return o;P.oscSeen=(P.oscSeen||0)+1;
+  try{var rec={f:null,start:null,type:'sine'},fp=o.frequency,sv=fp.setValueAtTime;
+   fp.setValueAtTime=function(v){if(rec.f==null)rec.f=v;return sv.apply(fp,arguments);};
+   if(vdesc&&vdesc.set){Object.defineProperty(fp,'value',{configurable:true,get:function(){return vdesc.get.call(fp);},set:function(v){if(rec.f==null)rec.f=v;vdesc.set.call(fp,v);}});}
+   var st=o.start,sp=o.stop;
+   o.start=function(t){rec.start=(t==null)?g.currentTime:t;return st.apply(o,arguments);};
+   o.stop=function(t){var r=sp.apply(o,arguments);try{rec.type=o.type;decide(o,g,rec,(t==null)?g.currentTime:t,false);}catch(e){}return r;};
+  }catch(e){}return o;};
+ BAC.prototype.createOscillator.__pt613=1;
+ if(nrules.length||cfg.hushNoise!==false){var bc=BAC.prototype.createBufferSource;
+  BAC.prototype.createBufferSource=function(){var s=bc.apply(this,arguments);var g=this;if(own(g))return s;
+   try{var rec={f:null,start:null},st=s.start,sp=s.stop,stopped=false;
+    s.start=function(t){rec.start=(t==null)?g.currentTime:t;var r=st.apply(s,arguments);
+      try{var nw=Date.now();recent.push({t:nw,n:s});if(recent.length>12)recent.shift();if(!s.loop&&hushed(null,true,nw)&&rec.start-g.currentTime<1.5){s.disconnect();stopped=true;return r;}}catch(e){}
+      try{if(s.loop!==true){setTimeout(function(){if(!stopped){try{var d=(s.buffer?s.buffer.duration:0);decide(s,g,rec,rec.start+d,true);}catch(e){}}},0);}}catch(e){}return r;};
+    s.stop=function(t){stopped=true;var r=sp.apply(s,arguments);try{if(!s.loop)decide(s,g,rec,(t==null)?g.currentTime:t,true);}catch(e){}return r;};
+   }catch(e){}return s;};}
+ return true;};
+})();
+
+(function(){var P=window.PT613SFX;if(!P)return;
+var MUTED=function(){try{return !!(AU&&AU.muted)}catch(e){return false}};
+function W(o,k,s){return P.wrap(o,k,s,MUTED)}
+
+var o=(typeof SFX!=='undefined')?SFX:null;
+W(o,'jump',{n:'boing',vol:.6,gap:.08});W(o,'pickle',{n:'coin',vol:.8,gap:.03});W(o,'jar',{n:'sparkle',vol:.8});
+W(o,'rescue','success');W(o,'hurt',{n:'bump',vol:.9});W(o,'bounce',{n:'boing',rate:.8,vol:.7});
+W(o,'power',{n:'powerup',vol:.8});W(o,'click','click');W(o,'door',{n:'door',vol:.8});W(o,'win','success');
+W(o,'splash',{n:'splash',vol:.8});W(o,'checkpoint','correct');W(o,'alert',{n:'tick',vol:.8});
+
+P.preload(["boing", "coin", "sparkle", "success", "bump", "powerup", "click", "door", "splash", "correct", "tick"]);
+})();
+
+/* Playtime613 1.0.8 in-app update: Mission 5 "Pigeon Reports" fix (the power-up on the train deck is the super leap, so the
+   third secret formula can be reached). Shipped in this .js so the update downloads no HTML. Safe to run more than once. */
+(function(){ if(window.__pt613m5fix||typeof LB!=="function"||!LB.prototype||typeof LB.prototype.power!=="function")return; window.__pt613m5fix=1;
+  var P=LB.prototype.power; LB.prototype.power=function(x,y,kind){ if(kind==="shield"&&x===100&&this.c===160&&this.r===28&&this.theme==="dusk")kind="leap"; return P.call(this,x,y,kind); }; })();

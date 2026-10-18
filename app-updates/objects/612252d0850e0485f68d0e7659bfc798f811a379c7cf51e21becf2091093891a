@@ -1,0 +1,282 @@
+/* Playtime613 in-app updates (v1.0.5).
+   HOW IT WORKS: the .exe carries the app as it shipped. Updates are the app's own files (launcher, games, sounds),
+   downloaded into  <AppData>\Playtime613\updates\<version>\  and served from there by the app's built-in server
+   (Neutralino server.mount at /c/<version>/). No new .exe runs, so Windows/antivirus never sees a new program.
+   Only files that changed are downloaded; everything else is copied from what is already on the computer.
+   Every downloaded file is checked against its SHA-256 from the manifest before it is used.
+   Safety: the switch happens only after every file is in place; if an updated copy fails to start twice,
+   the app falls back to the version inside the .exe by itself.
+   Saves are untouched: same app id, same port, same localStorage, same saves.json.
+   Parents' side: "Updates & notes" (what's new, this family's computers and their versions, send us a note). */
+(function(){
+"use strict";
+var NL=(typeof Neutralino!=="undefined");
+var CUR=window.PT613_APP_VERSION||"0";                    /* version of the files running now */
+/* 1.0.8: an update overlay's folder name (/c/<version>/) is its version, so an update can leave index.html
+   (and its version line) exactly as it was. Downloading HTML is what some home internet filters / antivirus change on the way. */
+(function(){ var mv=/^\/c\/([0-9.]+)\//.exec(location.pathname); if(mv&&cmp(mv[1],CUR)>0){ CUR=mv[1]; window.PT613_APP_VERSION=CUR;
+  try{ document.addEventListener("DOMContentLoaded",function(){ try{ window.APP_VERSION=CUR; var v=document.getElementById("ver"); if(v&&v.textContent.indexOf(CUR)<0)v.textContent="Playtime613 · version "+CUR; }catch(e){} }); }catch(e){} } })();
+var SHELL=window.NL_APPVERSION||CUR;                       /* version of the .exe (Neutralino config) */
+var qs; try{ qs=new URLSearchParams(location.search); }catch(e){ qs={get:function(){return null;}}; }
+var FEEDS=qs.get("pt613_feed")?[qs.get("pt613_feed")]:(window.PT613_UPDATE_FEEDS||[
+  "https://raw.githubusercontent.com/yossi93/playtime613-downloads/main/app-updates/feed.json",
+  "https://playtime613.com/app-updates/feed.json"]);
+var API=qs.get("pt613_api")||window.PT613_FAMILY_API||"https://playtime613.com/api/app-family";
+var TESTFAST=!!qs.get("pt613_feed"), AUTO=qs.get("pt613_autoupdate")==="1";
+var LS="pt613upd", LSF="pt613upd_feed", LSQ="pt613upd_outbox", LSN="pt613upd_name";
+var A=null, feed=null, busy=false, dismissed=false;
+function $(id){return document.getElementById(id);}
+function esc(t){return String(t==null?"":t).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+function load(k,d){ try{ var v=JSON.parse(localStorage.getItem(k)||"null"); return v==null?d:v; }catch(e){ return d; } }
+function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+/* offline fix 1.0.5: network calls never wait long and never run while Windows says there is no internet;
+   every caller already catches the failure quietly (no error screen). */
+function tfetch(u,o,ms){ try{ if(navigator.onLine===false) return Promise.reject(new Error("offline")); }catch(e){}
+  var ctl=null; try{ ctl=new AbortController(); }catch(e){} o=o||{}; if(ctl)o.signal=ctl.signal;
+  var t=setTimeout(function(){ try{ ctl&&ctl.abort(); }catch(e){} },ms||15000);
+  return fetch(u,o).then(function(r){ clearTimeout(t); return r; },function(e){ clearTimeout(t); throw e; }); }
+function cmp(a,b){ a=String(a||"0").split(".").map(Number); b=String(b||"0").split(".").map(Number);
+  for(var i=0;i<Math.max(a.length,b.length);i++){ var x=a[i]||0,y=b[i]||0; if(x!==y)return x>y?1:-1; } return 0; }
+function onOverlay(){ return /^\/c\/[0-9.]+\//.test(location.pathname); }
+function root(){ return onOverlay()?location.pathname.replace(/^(\/c\/[0-9.]+\/).*$/,"$1"):"/"; }
+function encPath(p){ return p.split("/").map(encodeURIComponent).join("/"); }
+function dateTxt(ms){ if(!ms)return "—"; var d=new Date(ms); return d.toLocaleDateString([], {day:"numeric",month:"short",year:(new Date().getFullYear()!==d.getFullYear()?"numeric":undefined)}); }
+function agoTxt(ms){ if(!ms)return "—"; var m=Math.round((Date.now()-ms)/60000); if(m<2)return "just now"; if(m<60)return m+" min ago"; var h=Math.round(m/60); if(h<24)return h+(h==1?" hour":" hours")+" ago"; var d=Math.round(h/24); return d+(d==1?" day":" days")+" ago"; }
+function hex(buf){ var a=new Uint8Array(buf),s=""; for(var i=0;i<a.length;i++){ s+=(a[i]<16?"0":"")+a[i].toString(16);} return s; }
+function sha(buf){ if(!(window.crypto&&crypto.subtle))return Promise.resolve(null); return crypto.subtle.digest("SHA-256",buf).then(hex); }
+function dataRoot(){ return Neutralino.os.getPath("data").then(function(p){ return p.replace(/[\\\/]+$/,"")+"/Playtime613/updates"; }); }
+
+/* ---------- 1. start-up: run the newest downloaded copy ---------- */
+function mountAndGo(s){
+  var path="/c/"+s.active;
+  return Neutralino.filesystem.getStats(s.dir+"/index.html").then(function(){
+    return Neutralino.server.mount(path,s.dir).catch(function(e){
+      return Neutralino.server.getMounts().then(function(m){ if(JSON.stringify(m||{}).indexOf(path)>=0)return; throw e; }); });
+  }).then(function(){ location.replace(path+"/index.html"+location.search); });
+}
+function boot(){
+  if(!NL||onOverlay())return false;
+  var s=load(LS,{});
+  if(!s.active)return false;
+  if(cmp(s.active,SHELL)<=0){ s.old=s.dir; s.active=null; s.dir=null; save(LS,s); return false; }   /* a newer .exe already has it */
+  if((s.tries||0)>=2){ s.failed=s.active; s.active=null; s.tries=0; save(LS,s); return false; }        /* safety net */
+  s.tries=(s.tries||0)+1; save(LS,s);
+  document.documentElement.style.visibility="hidden";
+  try{ Neutralino.init(); }catch(e){}
+  mountAndGo(s).catch(function(e){ var t=load(LS,{}); t.failed=t.active; t.err=String(e&&e.message||e); t.active=null; t.tries=0; save(LS,t); location.reload(); });
+  return true;
+}
+function startedOk(){              /* called by the launcher once the home screen is up */
+  var s=load(LS,{});
+  if(onOverlay()&&s.active===CUR&&s.tries){ s.tries=0; save(LS,s); }
+  if(!NL)return;
+  dataRoot().then(function(r){ return Neutralino.filesystem.readDirectory(r).then(function(list){
+    (list||[]).forEach(function(e){ var n=e.entry||e; if(n==="."||n===".."||n===s.active||!/^[0-9.]+$/.test(n))return;
+      Neutralino.filesystem.remove(r+"/"+n).catch(function(){}); }); }); }).catch(function(){});
+}
+
+/* ---------- 2. checking ---------- */
+function getFeed(){
+  var i=0;
+  function next(){ if(i>=FEEDS.length)return Promise.reject(new Error("offline"));
+    var u=FEEDS[i++]; return tfetch(u+(u.indexOf("?")<0?"?":"&")+"t="+Date.now(),{cache:"no-store"}).then(function(r){ if(!r.ok)throw new Error("HTTP "+r.status); return r.json(); })
+      .then(function(f){ if(!f||!f.latest)throw new Error("bad feed"); f._url=u; return f; }).catch(next); }
+  return next();
+}
+function state(){
+  var f=feed||load(LSF,null);
+  if(!f||cmp(f.latest,CUR)<=0)return {kind:"current",feed:f};
+  if(f.min_app&&cmp(SHELL,f.min_app)<0)return {kind:"download",feed:f};
+  return {kind:"ready",feed:f};
+}
+function newNotes(f){ return ((f&&f.notes)||[]).filter(function(n){ return cmp(n.v,CUR)>0; }); }
+function check(quiet){
+  return getFeed().then(function(f){ feed=f; save(LSF,f); var s=load(LS,{}); s.checked=Date.now(); save(LS,s); refresh();
+    if(AUTO&&state().kind==="ready"&&!busy)install(); return state(); })
+  .catch(function(e){ var s=load(LS,{}); s.checkErr=Date.now(); save(LS,s); refresh(); if(!quiet)throw e; return state(); });
+}
+
+/* ---------- 3. installing ---------- */
+function install(onProg){
+  if(busy)return Promise.reject(new Error("busy")); if(!NL)return Promise.reject(new Error("Updates work in the Playtime613 app."));
+  var st=state(); if(st.kind!=="ready")return Promise.reject(new Error(st.kind));
+  busy=true; var f=st.feed, mUrl=new URL(f.manifest,f._url).href, oUrl=new URL(f.objects||"objects/",f._url).href;
+  var m, here, dir, done=0, total=0, got=0;
+  function prog(t){ if(onProg)onProg(total?done/total:0,t); paintProgress(total?done/total:0,t); }
+  prog("Getting ready…");
+  return Promise.all([
+    fetch(mUrl,{cache:"no-store"}).then(function(r){ if(!r.ok)throw new Error("The update list didn't download ("+r.status+")."); return r.json(); }),
+    fetch(root()+"content-manifest.json",{cache:"no-store"}).then(function(r){ return r.ok?r.json():{files:{}}; }).catch(function(){ return {files:{}}; }),
+    dataRoot()
+  ]).then(function(r){
+    m=r[0]; here=r[1]; dir=r[2]+"/"+m.version;
+    var paths=Object.keys(m.files); paths.forEach(function(p){ total+=(m.sizes&&m.sizes[p])||1; });
+    var dirs={}; paths.forEach(function(p){ var a=p.split("/"); for(var i=1;i<a.length;i++)dirs[a.slice(0,i).join("/")]=1; });
+    var dl=Object.keys(dirs).sort(function(a,b){return a.length-b.length;});
+    return Neutralino.filesystem.remove(dir).catch(function(){}).then(function(){ return Neutralino.filesystem.createDirectory(dir).catch(function(){}); })
+      .then(function(){ return dl.reduce(function(p,d){ return p.then(function(){ return Neutralino.filesystem.createDirectory(dir+"/"+d).catch(function(){}); }); },Promise.resolve()); })
+      .then(function(){
+        var q=paths.slice(), fresh=paths.filter(function(p){return here.files[p]!==m.files[p];}).length;
+        prog(fresh?("Downloading "+fresh+(fresh==1?" new file":" new files")+"…"):"Almost done…");
+        /* 1.0.8: every file is checked; a copy that doesn't match is fetched again another way before giving up:
+           this computer's copy -> download -> fresh download (no cache) -> the same file packed as .gz (binary, which filters
+           and antivirus leave alone) -> the other update server. Only if every way gives different bytes does the update stop. */
+        var failed=false, alts=[oUrl];
+        FEEDS.forEach(function(u){ try{ var a=new URL(f.objects||"objects/",u).href; if(alts.indexOf(a)<0)alts.push(a); }catch(e){} });
+        function one(p){
+          var want=m.files[p], local=(here.files[p]===want);
+          function ok(buf){ if(!buf)return null; return sha(buf).then(function(h){ return (!h||h===want)?buf:null; }); }
+          function plain(u,fresh){ got++; return fetch(u+want+(fresh?"?r="+Date.now():""),fresh?{cache:"no-store"}:{}).then(function(r){ if(!r.ok)throw new Error("A file didn't download ("+r.status+")."); return r.arrayBuffer(); }); }
+          function packed(u){ if(typeof DecompressionStream==="undefined")return Promise.resolve(null);
+            return fetch(u+want+".gz",{cache:"no-store"}).then(function(r){ if(!r.ok||!r.body)return null; return new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer(); }).catch(function(){ return null; }); }
+          var tries=[];
+          if(local)tries.push(function(){ return fetch(root()+encPath(p),{cache:"no-store"}).then(function(r){ return r.ok?r.arrayBuffer():null; }).catch(function(){ return null; }); });
+          tries.push(function(){ return plain(oUrl,false); });
+          tries.push(function(){ return plain(oUrl,true).catch(function(){ return null; }); });
+          alts.forEach(function(u){ tries.push(function(){ return packed(u); }); });
+          alts.slice(1).forEach(function(u){ tries.push(function(){ return plain(u,true).catch(function(){ return null; }); }); });
+          var i=0, firstErr=null, bad=false;
+          function next(){ if(failed)return Promise.reject(new Error("stopped"));
+            if(i>=tries.length)throw (firstErr&&!bad)?firstErr:new Error("A download was changed on its way to this computer (an internet filter or antivirus can do this). Nothing was changed. Please try again later, or get the newest version from playtime613.com.");
+            var t=tries[i++]; return Promise.resolve().then(t).catch(function(e){ if(!firstErr)firstErr=e; return null; })
+              .then(function(buf){ if(buf&&!(local&&i===1))bad=true; return ok(buf); }).then(function(good){ return good||next(); }); }
+          return next()
+            .then(function(buf){ return Neutralino.filesystem.writeBinaryFile(dir+"/"+p,buf); })
+            .then(function(){ done+=(m.sizes&&m.sizes[p])||1; if(Math.random()<0.2&&!failed)prog(); });
+        }
+        function worker(){ var p=q.shift(); return (p==null||failed)?Promise.resolve():one(p).then(worker,function(e){ if(!failed){ failed=true; throw e; } }); }
+        return Promise.all([worker(),worker(),worker(),worker(),worker(),worker()]);
+      })
+      .then(function(){ return Neutralino.filesystem.writeFile(dir+"/content-manifest.json",JSON.stringify(m)); });
+  }).then(function(){
+    var s=load(LS,{}); s.active=m.version; s.dir=dir; s.tries=0; s.updatedAt=Date.now(); s.from=CUR; s.failed=null; save(LS,s);
+    prog("Done! Opening the new version…");
+    return hello(m.version,true).catch(function(){})
+      .then(function(){ return (A&&A.mirror)?A.mirror().catch(function(){}):null; })
+      .then(function(){ return new Promise(function(res){ setTimeout(res,700); }); })
+      .then(function(){ return mountAndGo(s); });
+  }).catch(function(e){ busy=false; var msg=(e&&e.message)||String(e); if(/space|disk|ENOSPC|NE_FS_FILWRER/i.test(msg))msg="There isn't enough room on this computer for the update.";
+    paintProgress(-1,msg); throw e; });
+}
+
+/* ---------- 4. this family's computers + notes to us ---------- */
+function deviceId(){ var s=load(LS,{}); if(s.dev)return Promise.resolve(s.dev);
+  var g=NL?Neutralino.computer.getMachineId().catch(function(){return "";}):Promise.resolve("");
+  return g.then(function(id){ id=id||("r"+Math.random().toString(36).slice(2)+Date.now().toString(36)); return sha(new TextEncoder().encode("pt613dev|"+id)); })
+    .then(function(h){ var t=load(LS,{}); t.dev=(h||("d"+Date.now().toString(36))).slice(0,20); save(LS,t); return t.dev; }); }
+function familyId(){ var k=""; try{ var st=window.PT613_LIC&&PT613_LIC._state(); k=(st&&st.rec&&st.rec.act&&st.rec.act.key)||""; }catch(e){}
+  if(!k)return deviceId().then(function(d){ return "solo-"+d; });
+  return sha(new TextEncoder().encode("pt613fam|"+k)).then(function(h){ return (h||"").slice(0,24); }); }
+function devName(){ var n=load(LSN,""); if(n)return Promise.resolve(n);
+  if(!NL)return Promise.resolve("This computer");
+  return Neutralino.os.getEnv("COMPUTERNAME").catch(function(){return "";}).then(function(v){ return v||"This computer"; }); }
+function post(body){ return tfetch(API,{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify(body)}).then(function(r){ if(!r.ok)throw new Error("HTTP "+r.status); return r.json().catch(function(){return {};}); }); }
+function hello(ver,updated){
+  return Promise.all([familyId(),deviceId(),devName()]).then(function(a){ var s=load(LS,{});
+    return post({t:"hello",family:a[0],device:a[1],name:a[2],version:ver||CUR,shell:SHELL,overlay:onOverlay(),updatedAt:updated?Date.now():(s.updatedAt||null)}); });
+}
+function devices(){ return familyId().then(function(fam){ return tfetch(API+"?family="+encodeURIComponent(fam),{cache:"no-store"}).then(function(r){ if(!r.ok)throw new Error("HTTP "+r.status); return r.json(); }); }); }
+function flushOutbox(){ var q=load(LSQ,[]); if(!q.length)return Promise.resolve(0);
+  var b=q[0]; return post(b).then(function(){ var r=load(LSQ,[]); r.shift(); save(LSQ,r); return flushOutbox(); }).catch(function(){ return q.length; }); }
+function sendNote(kind,text,email){
+  return Promise.all([familyId(),deviceId(),devName()]).then(function(a){
+    var b={t:"note",family:a[0],device:a[1],name:a[2],version:CUR,kind:kind,text:text,email:email||"",at:Date.now()};
+    var q=load(LSQ,[]); q.push(b); save(LSQ,q); return flushOutbox(); }); }
+
+/* ---------- 5. what families see ---------- */
+var css='#updNote{position:fixed;left:50%;bottom:18px;white-space:nowrap;transform:translateX(-50%);z-index:9000;display:flex;align-items:center;gap:12px;background:#fff8e1;color:#3b2a00;border:2px solid #f5c542;border-radius:999px;padding:8px 10px 8px 18px;box-shadow:0 6px 24px rgba(0,0,0,.25);font:600 15px/1.2 system-ui,Segoe UI,sans-serif;max-width:92vw}'+
+ '#updNote b{font-weight:800}#updNote button{font:inherit;font-weight:800;border:0;border-radius:999px;padding:8px 16px;cursor:pointer}#updNote .go{background:#2e7d32;color:#fff}#updNote .later{background:transparent;color:#7a5b00;padding:8px 8px}'+
+ '.updM{position:fixed;inset:0;z-index:9500;background:rgba(10,20,40,.55);display:flex;align-items:center;justify-content:center;font:15px/1.45 system-ui,Segoe UI,sans-serif}'+
+ '.updM .bx{background:#fff;color:#1d2433;border-radius:18px;width:min(760px,94vw);max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)}'+
+ '.updM .hd{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #e8ecf3;position:sticky;top:0;background:#fff;border-radius:18px 18px 0 0}.updM .hd h2{margin:0;font-size:20px;flex:1}'+
+ '.updM .hd button,.updM .btn{font:inherit;font-weight:700;border:0;border-radius:10px;padding:9px 16px;cursor:pointer;background:#eef2f8;color:#1d2433}.updM .pri{background:#2e7d32;color:#fff}.updM .pri[disabled]{opacity:.55;cursor:default}'+
+ '.updM .bd{padding:16px 20px;display:grid;gap:14px}.updM .cd{border:1px solid #e4e9f2;border-radius:14px;padding:14px 16px}.updM .cd h3{margin:0 0 8px;font-size:16px}'+
+ '.updM .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.updM .sp{flex:1}.updM .muted{color:#667085;font-size:13px}.updM ul{margin:6px 0 0;padding-left:20px}.updM li{margin:3px 0}'+
+ '.updM .vh{font-weight:800;margin-top:8px}.updM .vh:first-child{margin-top:0}.updM table{width:100%;border-collapse:collapse;font-size:14px}.updM td,.updM th{text-align:left;padding:7px 6px;border-bottom:1px solid #eef1f6}.updM th{color:#667085;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}'+
+ '.updM .ok{color:#2e7d32;font-weight:700}.updM .old{color:#b26a00;font-weight:700}.updM textarea{width:100%;box-sizing:border-box;min-height:84px;border:1px solid #cfd6e4;border-radius:10px;padding:10px;font:inherit;resize:vertical}'+
+ '.updM input[type=text],.updM input[type=email]{border:1px solid #cfd6e4;border-radius:10px;padding:8px 10px;font:inherit}.updM .chips button{border-radius:999px;padding:6px 12px;font-size:13px}.updM .chips .on{background:#1d4ed8;color:#fff}'+
+ '.updM .bar{height:10px;background:#e8ecf3;border-radius:99px;overflow:hidden;margin-top:8px}.updM .bar i{display:block;height:100%;width:0;background:#2e7d32;transition:width .3s}.updM .err{color:#b42318;font-weight:600}.updM .thx{color:#2e7d32;font-weight:700}';
+function ensureCss(){ if($("updCss"))return; var s=document.createElement("style"); s.id="updCss"; s.textContent=css+'#bParents.updDot,#bParents2.updDot{position:relative}.updDot::after{content:"";position:absolute;top:1px;right:1px;width:9px;height:9px;border-radius:50%;background:#ff5a5f;box-shadow:0 0 0 2px rgba(0,0,0,.3)}'; document.head.appendChild(s); }
+function notesHTML(list,max){ if(!list||!list.length)return '<p class="muted" style="margin:0">Nothing new yet.</p>';
+  return list.slice(0,max||4).map(function(n){ return '<div class="vh">Version '+esc(n.v)+(n.date?' <span class="muted">· '+esc(n.date)+'</span>':'')+'</div><ul>'+(n.items||[]).map(function(i){return '<li>'+esc(i)+'</li>';}).join("")+'</ul>'; }).join(""); }
+function refresh(){ paintNote(); paintStatus(); }
+function paintNote(){
+  /* Kids' home screen shows no update UI. Only a small dot on the Parents button; everything lives in Parents -> Updates & notes. */
+  ensureCss(); var st=state(), on=(st.kind==="ready"||st.kind==="download")&&!busy, n=$("updNote"); if(n)n.remove();
+  ["bParents","bParents2"].forEach(function(id){ var b=$(id); if(b){ if(on)b.classList.add("updDot"); else b.classList.remove("updDot"); b.title=on?"Parent controls (PIN) · update ready":"Parent controls (PIN)"; } });
+}
+function statusCard(){
+  var st=state(), s=load(LS,{}), nn=newNotes(st.feed);
+  var h='<div class="cd" id="updStat"><h3>This computer</h3><div class="row"><div><div><b>Version '+esc(CUR)+'</b>'+(s.updatedAt&&onOverlay()?' <span class="muted">· updated '+esc(dateTxt(s.updatedAt))+'</span>':'')+'</div>';
+  if(st.kind==="ready") h+='<div class="old">Version '+esc(st.feed.latest)+' is ready</div>';
+  else if(st.kind==="download") h+='<div class="old">Version '+esc(st.feed.latest)+' needs a fresh download from our website, one time only.</div>';
+  else h+='<div class="ok">✓ Up to date</div>';
+  h+='<div class="muted">'+(s.checked?'Checked '+esc(agoTxt(s.checked)):'Not checked yet')+'</div></div><span class="sp"></span>';
+  h+=st.kind==="ready"?'<button class="btn pri" id="updGo">⬇ Update now</button>':'<button class="btn" id="updChk">🔄 Check now</button>';
+  h+='</div><div id="updProg" style="display:none"><div class="muted" id="updProgT"></div><div class="bar"><i id="updProgB"></i></div></div>';
+  if(st.kind==="ready"&&nn.length) h+='<div style="margin-top:10px"><b>In this update</b>'+notesHTML(nn,3)+'</div>';
+  if(s.failed) h+='<p class="err" style="margin:8px 0 0">The last update didn\'t open properly, so this computer went back to version '+esc(CUR)+'. Try again, or send us a note below.</p>';
+  return h+'</div>';
+}
+function wireStatus(m){
+  var g=m.querySelector("#updGo"), c=m.querySelector("#updChk");
+  if(g)g.onclick=function(){ g.disabled=true; install().catch(function(){ g.disabled=false; }); };
+  if(c)c.onclick=function(){ c.disabled=true; c.textContent="Checking…"; check(false).then(function(){ paintStatus(); }).catch(function(){ c.disabled=false; c.textContent="🔄 Check now"; var t=m.querySelector("#updStat .muted:last-of-type"); paintProgress(-1,"Couldn't reach Playtime613. Check the internet and try again."); }); };
+}
+function paintStatus(){ var m=$("updModal"); if(!m||busy)return; var o=m.querySelector("#updStat"); if(!o)return; var d=document.createElement("div"); d.innerHTML=statusCard(); o.replaceWith(d.firstChild); wireStatus(m); }
+function paintProgress(f,t){ var p=$("updProg"); if(!p)return; p.style.display="block"; var tt=$("updProgT");
+  if(f<0){ tt.className="err"; tt.textContent=t; $("updProgB").style.width="0"; return; }
+  tt.className="muted"; if(t)tt.textContent=t; $("updProgB").style.width=Math.round(f*100)+"%"; }
+function modal(title,body){ ensureCss(); var o=$("updModal"); if(o)o.remove();
+  var m=document.createElement("div"); m.id="updModal"; m.className="updM"; m.setAttribute("role","dialog");
+  m.innerHTML='<div class="bx"><div class="hd"><h2>'+title+'</h2><button class="x">✔ Done</button></div><div class="bd">'+body+'</div></div>';
+  document.body.appendChild(m); m.querySelector(".x").onclick=function(){ if(!busy)m.remove(); }; wireStatus(m); return m; }
+function openStatus(go){
+  var f=state().feed, m=modal("🔄 Updates",statusCard()+'<div class="cd"><h3>What\'s new</h3>'+notesHTML(f&&f.notes,3)+'</div>');
+  if(go){ var g=m.querySelector("#updGo"); if(g)g.click(); }
+  if(!f)check(true);
+}
+function openParent(){
+  var f=state().feed;
+  var m=modal("📣 Updates &amp; notes",statusCard()+
+   '<div class="cd"><h3>What\'s new</h3>'+notesHTML(f&&f.notes,3)+'</div>'+
+   '<div class="cd"><div class="row"><h3 style="margin:0">Your family\'s computers</h3><span class="sp"></span><span class="muted">This computer\'s name</span><input type="text" id="updName" maxlength="30" style="width:170px"></div><div id="updDev" style="margin-top:8px"><p class="muted">Loading…</p></div></div>'+
+   '<div class="cd"><h3>Send us a note</h3><p class="muted" style="margin:0 0 8px">Something to fix, an idea, or a game you\'d like. It goes straight to the Playtime613 team.</p>'+
+   '<div class="row chips" id="updKind"><button class="btn on" data-k="fix">Something to fix</button><button class="btn" data-k="idea">An idea</button><button class="btn" data-k="game">A game request</button></div>'+
+   '<textarea id="updTxt" maxlength="2000" placeholder="Type your note here…" style="margin-top:8px"></textarea>'+
+   '<div class="row" style="margin-top:8px"><input type="email" id="updMail" placeholder="Your email (only if you\'d like a reply)" style="flex:1;min-width:220px"><button class="btn pri" id="updSend">Send</button></div><div id="updSent" style="margin-top:6px"></div></div>');
+  var kind="fix"; Array.prototype.forEach.call(m.querySelectorAll("#updKind button"),function(b){ b.onclick=function(){ kind=b.getAttribute("data-k"); Array.prototype.forEach.call(m.querySelectorAll("#updKind button"),function(x){x.classList.toggle("on",x===b);}); }; });
+  var nm=m.querySelector("#updName"); devName().then(function(n){ nm.value=n; });
+  nm.onchange=function(){ var v=nm.value.trim().slice(0,30); if(v){ save(LSN,v); hello(null,false).then(drawDevices,drawDevices); } };
+  m.querySelector("#updSend").onclick=function(){ var t=m.querySelector("#updTxt").value.trim(), out=m.querySelector("#updSent"); if(!t){ out.innerHTML='<span class="err">Please type a note first.</span>'; return; }
+    var b=this; b.disabled=true; sendNote(kind,t,m.querySelector("#updMail").value.trim()).then(function(left){
+      m.querySelector("#updTxt").value=""; b.disabled=false;
+      out.innerHTML=left?'<span class="muted">Saved. It will send by itself next time this computer is online.</span>':'<span class="thx">✓ Thank you! Your note was sent to the Playtime613 team.</span>'; }); };
+  function drawDevices(){ var box=m.querySelector("#updDev"); devices().then(function(r){
+      var list=(r&&r.devices)||[], latest=(state().feed&&state().feed.latest)||CUR;
+      if(!list.length)throw new Error("none");
+      list.sort(function(a,b){ return (b.seen||0)-(a.seen||0); });
+      box.innerHTML='<table><tr><th>Computer</th><th>Version</th><th>Last updated</th><th>Last opened</th></tr>'+list.map(function(d){
+        var mine=d.device===load(LS,{}).dev, up=cmp(d.version,latest)>=0;
+        return '<tr><td>'+esc(d.name||"Computer")+(mine?' <span class="muted">(this one)</span>':'')+'</td><td class="'+(up?'ok':'old')+'">'+esc(d.version)+(up?' ✓':' · needs update')+'</td><td>'+esc(dateTxt(d.updatedAt))+'</td><td>'+esc(agoTxt(d.seen))+'</td></tr>'; }).join("")+'</table>'+
+        '<p class="muted" style="margin:8px 0 0">Every computer using your licence key shows here once it has been opened with the internet on.</p>';
+    }).catch(function(){ var s=load(LS,{});
+      box.innerHTML='<table><tr><th>Computer</th><th>Version</th><th>Last updated</th></tr><tr><td>'+esc(nm.value||"This computer")+' <span class="muted">(this one)</span></td><td>'+esc(CUR)+'</td><td>'+esc(dateTxt(s.updatedAt))+'</td></tr></table><p class="muted" style="margin:8px 0 0">Your other computers show here once they\'re online.</p>'; }); }
+  drawDevices(); if(!f)check(true);
+}
+
+/* ---------- 6. wiring ---------- */
+function addButton(){ var old=$("bUpd"); if(old)old.remove(); return; /* no Updates button on the kids' screen */ var f=document.querySelector("#home footer"); if(!f||$("bUpd"))return; ensureCss();
+  var b=document.createElement("button"); b.id="bUpd"; b.title="Check for new games and features"; b.textContent="🔄 Updates"; b.onclick=function(){ openStatus(false); };
+  f.insertBefore(b,$("bParents")||$("bSettings")||$("ver")||null); }
+function attach(api){
+  A=api||{}; addButton(); refresh();
+  if(onOverlay()){ var s=load(LS,{}); if(s.updatedAt&&Date.now()-s.updatedAt<120000&&!s.shownDone){ s.shownDone=true; save(LS,s); var nn=newNotes({notes:(load(LSF,{})||{}).notes}).length;
+      setTimeout(function(){ if(A.toast)A.toast("✓ Updated to version "+CUR+". Parents can see what's new in 🔒 Parents.",6000); },900); } }
+  setTimeout(function(){ startedOk(); check(true); hello(null,false).catch(function(){}); flushOutbox(); }, TESTFAST?800:8000);
+  try{ window.addEventListener("online",function(){ setTimeout(function(){ check(true).catch(function(){}); hello(null,false).catch(function(){}); flushOutbox(); },3000); }); }catch(e){}  /* offline fix 1.0.5: catch up when the internet comes back */
+  setInterval(function(){ check(true); }, 6*3600*1000);
+  setInterval(paintNote, 4000);
+}
+window.PT613_UPD={ boot:boot, attach:attach, check:check, install:install, openStatus:openStatus, openParent:openParent, state:state, _v:function(){return {cur:CUR,shell:SHELL,overlay:onOverlay(),s:load(LS,{})};} };
+})();
