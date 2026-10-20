@@ -1,0 +1,28 @@
+/* Playtime613 desktop: the game list.
+   To add a game: put its folder in games/<id>/ (index.html, optional thumb.jpg)
+   and add ONE line below. Order here = order on the home screen. The id must never change once released
+   (it names the game's save space). */
+window.PT613_GAMES = [
+  {"id": "simcha-park", "title": "Simcha Park", "emoji": "🎡", "tagline": "Build your own theme park! Build rides, keep the visitors happy and grow your park."},
+  {"id": "pickle-boy-rescue", "title": "Pickle Boy: Brooklyn Rescue", "emoji": "🥒", "tagline": "Run, jump and rescue people across Brooklyn."},
+  {"id": "zevdov-deli", "title": "Zevdov Deli", "emoji": "🍲", "tagline": "Cook kugel, cholent and more, then serve customers at the counter."},
+  {"id": "gittels-bakery", "title": "Gittel's Bakery", "emoji": "🥐", "tagline": "Bake challah and yummy treats, then open the shop and serve the customers."},
+  {"id": "bakery-rush", "title": "Bracha's Bakery Rush", "emoji": "🥯", "tagline": "Serve the orders at the counter before the customers get impatient!"},
+  {"id": "noach-ark", "title": "Noach's Teivah", "emoji": "🚢", "tagline": "Two by two, before the rain! Bring the right animals onto the teivah."},
+  {"id": "beis-hamikdash", "title": "Walk Through the Beis Hamikdash", "emoji": "🕍", "tagline": "Walk through the Beis Hamikdash in 3D and see the avodah."},
+  {"id": "sukkah-builder", "title": "Sukkah Builder", "emoji": "🌿", "tagline": "Put up the walls, lay the schach, then find out if it's kosher!"},
+  {"id": "milchig-or-fleishig", "title": "Milchig or Fleishig?", "emoji": "🥛", "tagline": "Sort the food before it falls off the belt: milchig, fleishig or pareve?"},
+  {"id": "herring-juice", "title": "Herring Juice", "emoji": "🐟", "tagline": "Make the juice, play the arcade or run the juice bar. Voice-narrated."},
+  {"id": "chess-academy", "title": "Polly Chess Academy", "emoji": "🦜", "tagline": "Polly the parrot teaches chess from scratch, all the way to a certificate."},
+  {"id": "times-trial", "title": "Times Trial", "emoji": "🏎️", "tagline": "Race your car by answering times tables. The faster you answer, the faster you go."},
+  {"id": "shomrim-patrol", "title": "Shomrim Patrol", "emoji": "🔦", "tagline": "Evening watch on Shalom Road: find what's lost and fix what's not right."},
+  {"id": "hatzolah-dash", "title": "Hatzolah Dash", "emoji": "🚑", "tagline": "Lights on, siren on! Get to every call in time."},
+  {"id": "chaverim", "title": "Chaverim to the Rescue", "emoji": "🚐", "tagline": "Drive the Chaverim van to every call: fix flat tyres, open locked cars and rescue the cat."},
+  {"id": "shul-builder", "title": "Shul Builder", "emoji": "🏛️", "tagline": "Build and decorate your own shul, then fill it with davening, simchas and Yom Tov."},
+  {"id": "mitzvah-run", "title": "Mitzvah Run", "emoji": "🏃", "tagline": "Run down the street, dodge the bumps and stop to help: every mitzvah counts!"},
+  {"id": "tzedakah-maze", "title": "Tzedakah Maze", "emoji": "🪙", "tagline": "Find your way through the maze, collect coins and bring them to the pushka."},
+  {"id": "maakeh-builder", "title": "Ma'akeh Builder", "emoji": "🧱", "tagline": "Build a safe fence around the roof, just like the Torah says, before anyone climbs up."},
+  {"id": "which-bracha", "title": "Which Bracha?", "emoji": "🍎", "tagline": "Which bracha do we make? Pick the right one for every food and become a bracha expert."},
+  {"id": "board-game-box", "title": "Board Game Box", "emoji": "🎲", "tagline": "Ladders & Slides, Ludo and Draughts: board games to play together with the family."},
+  {"id": "chess-studio", "title": "Chess Studio", "emoji": "♟️", "tagline": "Play chess with a friend or against the computer, with hints and undo when you need them."},
+];

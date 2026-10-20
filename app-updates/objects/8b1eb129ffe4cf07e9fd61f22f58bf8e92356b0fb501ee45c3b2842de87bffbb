@@ -1,0 +1,27 @@
+/* Which Bracha? sound effects: pure WebAudio synthesis, offline, no files.
+   window.PT613BrachosSFX = { on, ctx(), click, start, whoosh, plop, correct(streak), oops, slip, hint, win(stars) }
+   'on' is remembered in localStorage pt613_sfx_brachos. Shares one AudioContext with the game's music. */
+(function(){
+"use strict";
+var C=null, M=null;
+function ctx(){ if(!C){ var K=window.AudioContext||window.webkitAudioContext; if(!K) return null; C=new K(); M=C.createGain(); M.gain.value=0.5; M.connect(C.destination);} if(C.state==='suspended'){ try{C.resume();}catch(e){} } return C; }
+function tone(f,t,d,v,type,slideTo){ var c=ctx(); if(!c) return; var o=c.createOscillator(), g=c.createGain(); o.type=type||'sine';
+  o.frequency.setValueAtTime(f,c.currentTime+t); if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo,c.currentTime+t+d);
+  g.gain.setValueAtTime(0.0001,c.currentTime+t); g.gain.exponentialRampToValueAtTime(v||0.2,c.currentTime+t+0.015); g.gain.exponentialRampToValueAtTime(0.0001,c.currentTime+t+d);
+  o.connect(g); g.connect(M); o.start(c.currentTime+t); o.stop(c.currentTime+t+d+0.05); }
+function noise(t,d,v,f){ var c=ctx(); if(!c) return; var n=Math.floor(c.sampleRate*d), b=c.createBuffer(1,n,c.sampleRate), a=b.getChannelData(0); for(var i=0;i<n;i++) a[i]=(Math.random()*2-1)*(1-i/n);
+  var s=c.createBufferSource(); s.buffer=b; var fl=c.createBiquadFilter(); fl.type='bandpass'; fl.frequency.value=f||1200; fl.Q.value=0.8; var g=c.createGain(); g.gain.value=v||0.15; s.connect(fl); fl.connect(g); g.connect(M); s.start(c.currentTime+t); }
+var on=true; try{ on=localStorage.getItem('pt613_sfx_brachos')!=='0'; }catch(e){}
+var X={ on:on, ctx:ctx,
+  click:function(){ tone(880,0,0.06,0.12,'triangle'); },
+  start:function(){ [523,659,784].forEach(function(f,i){ tone(f,i*0.08,0.18,0.14,'triangle'); }); },
+  whoosh:function(){ noise(0,0.28,0.06,700); },
+  correct:function(s){ var up=Math.min(s||0,6)*30; tone(660+up,0,0.12,0.18,'triangle'); tone(990+up,0.09,0.22,0.16,'triangle'); tone(1320+up,0.18,0.18,0.06,'sine'); },
+  oops:function(){ tone(392,0,0.16,0.14,'sine',330); tone(330,0.15,0.22,0.12,'sine',294); },
+  plop:function(){ tone(180,0,0.12,0.16,'sine',90); noise(0,0.06,0.05,400); },
+  slip:function(){ tone(500,0,0.35,0.12,'triangle',250); },
+  hint:function(){ [1046,1318,1568].forEach(function(f,i){ tone(f,i*0.06,0.2,0.08,'sine'); }); },
+  win:function(st){ var n=[523,659,784,1046,1318]; n.slice(0,2+(st||1)).forEach(function(f,i){ tone(f,i*0.13,0.3,0.16,'triangle'); }); tone(1568,0.13*(2+(st||1)),0.6,0.1,'sine'); }
+};
+window.PT613BrachosSFX=X;
+})();

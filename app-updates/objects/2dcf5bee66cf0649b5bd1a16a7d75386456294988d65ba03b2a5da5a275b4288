@@ -1,0 +1,239 @@
+/* Playtime613 "How to play" guided tour engine (desktop app, fully offline: no network, no links).
+   Master copy: tools/tour/engine.js. Per-game config: tools/tour/<id>.js. Built into games/<id>/how-to-play.js
+   by tools/tour/make.py. Remembers the first-time offer in localStorage key  pt613_tut_<gameid>.
+   API: PT613Tour.setup(cfg); PT613Tour.open(from); PT613Tour.close(); PT613Tour.isOpen()
+   cfg = { id, name, mascot, accent, steps:[{el, text, keys:[], title}], startButton:{into, label, style},
+           pauseButton:{into, label}, isStartScreen(), canOffer(), onOpen(from), onClose(finished, from),
+           muted() -> true when the game's sound/voice is off, offerSay: spoken offer line }
+   step.say: the spoken narration, ONE plain string literal per step (pre-recorded by the narrator at build time).
+   step.el: CSS selector | function returning an Element, a {x,y,w,h} rect, or null (null = centred card). */
+(function(){
+"use strict";
+if(window.PT613Tour) return;
+var C=null, OPEN=false, I=0, FROM='', ROOT, HOLE, ARROW, CARD, OFFER, TICK=0, OFFER_T=0, LASTKEY=0;
+function $(s){ try{ return typeof s==='string'?document.querySelector(s):null; }catch(e){ return null; } }
+function key(){ return 'pt613_tut_'+C.id; }
+var SPOKE=false;
+function tutSay(t){ try{ if(!t||!window.speechSynthesis||!window.SpeechSynthesisUtterance) return; if(C.muted&&C.muted()) return; speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(t)); SPOKE=true; }catch(e){} }
+function tutHush(){ try{ if(SPOKE&&window.speechSynthesis) speechSynthesis.cancel(); }catch(e){} SPOKE=false; }
+function getK(){ try{ return localStorage.getItem(key()); }catch(e){ return '1'; } }
+function setK(v){ try{ localStorage.setItem(key(),v); }catch(e){} }
+function esc(t){ return String(t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function fmt(t){ return esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>'); }
+function visible(el){
+  if(!el||!el.getBoundingClientRect) return null;
+  var r=el.getBoundingClientRect(); if(r.width<2||r.height<2) return null;
+  var s=getComputedStyle(el); if(s.visibility==='hidden'||s.display==='none'||+s.opacity===0) return null;
+  for(var p=el;p&&p!==document.body;p=p.parentElement){ var ps=getComputedStyle(p); if(ps.display==='none'||ps.visibility==='hidden'||+ps.opacity===0) return null; }
+  if(r.right<0||r.bottom<0||r.left>innerWidth||r.top>innerHeight) return null;
+  return {x:r.left,y:r.top,w:r.width,h:r.height};
+}
+function target(st){
+  var t=st.el; if(!t) return null;
+  try{ if(typeof t==='function') t=t(); }catch(e){ t=null; }
+  if(!t) return null;
+  if(typeof t==='string') t=$(t);
+  if(t&&typeof t.x==='number'&&!t.getBoundingClientRect) return (t.w>1&&t.h>1)?t:null;
+  return visible(t);
+}
+var CSS='#pt613tour,#pt613offer{position:fixed;inset:0;z-index:2147483000;font-family:inherit;-webkit-user-select:none;user-select:none;touch-action:manipulation}'+
+'#pt613tour .tdim{position:absolute;inset:0;background:rgba(10,20,40,.62)}'+
+'#pt613tour .thole{position:absolute;border-radius:18px;box-shadow:0 0 0 5px #ffd34d,0 0 0 9999px rgba(10,20,40,.62);transition:all .25s ease;pointer-events:none;animation:pt613pulse 1s ease-in-out infinite alternate}'+
+'@keyframes pt613pulse{from{box-shadow:0 0 0 4px #ffd34d,0 0 0 9999px rgba(10,20,40,.62)}to{box-shadow:0 0 0 9px #ffe58a,0 0 0 9999px rgba(10,20,40,.62)}}'+
+'#pt613tour .tarrow{position:absolute;width:60px;height:60px;pointer-events:none;transition:left .25s,top .25s;filter:drop-shadow(0 3px 3px rgba(0,0,0,.4))}'+
+'#pt613tour .tarrow svg{width:60px;height:60px;animation:pt613bob .6s ease-in-out infinite alternate}'+
+'@keyframes pt613bob{from{transform:translateY(-6px)}to{transform:translateY(6px)}}'+
+'.pt613card{position:absolute;left:50%;transform:translateX(-50%);width:min(560px,94vw);box-sizing:border-box;background:#fffdf5;border:5px solid var(--ptacc,#ffb703);border-radius:26px;box-shadow:0 16px 44px rgba(0,0,0,.45);padding:16px 18px 14px;color:#2a2340;text-align:left;transition:top .25s ease}'+
+'.pt613card .thead{display:flex;align-items:center;gap:12px}'+
+'.pt613card .tman{flex:0 0 auto;width:62px;height:62px;border-radius:50%;background:#fff1c2;border:3px solid var(--ptacc,#ffb703);display:flex;align-items:center;justify-content:center;font-size:38px;line-height:1}'+
+'.pt613card .tstep{font-size:15px;font-weight:900;color:#d9480f;letter-spacing:.3px}'+
+'.pt613card .ttitle{font-size:19px;font-weight:900;color:#2a2340;line-height:1.15}'+
+'.pt613card .ttext{font-size:21px;font-weight:800;line-height:1.32;margin:10px 2px 6px}'+
+'.pt613card .ttext b{color:#2b8a3e}'+
+'.pt613card .tkeys{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 4px}'+
+'.pt613card .kc{display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:44px;padding:0 12px;box-sizing:border-box;border-radius:10px;background:linear-gradient(#ffffff,#e7e9ef);border:2px solid #9aa1b1;border-bottom-width:6px;font-size:20px;font-weight:900;color:#2a2340;font-family:inherit}'+
+'.pt613card .kc.wide{min-width:150px}'+
+'.pt613card .tdots{display:flex;gap:6px;justify-content:center;margin:8px 0 2px}'+
+'.pt613card .tdots i{width:11px;height:11px;border-radius:50%;background:#d8d2c0}.pt613card .tdots i.on{background:var(--ptacc,#ffb703);transform:scale(1.25)}'+
+'.pt613card .tbtns{display:flex;gap:10px;align-items:center;margin-top:10px}'+
+'.pt613card button{font-family:inherit;cursor:pointer;border:0;border-radius:16px;padding:12px 18px;font-size:19px;font-weight:900;color:#2a2340;background:#eceff4;box-shadow:0 4px 0 #b9bfcc;min-height:50px}'+
+'.pt613card button:active{transform:translateY(3px);box-shadow:0 1px 0 #b9bfcc}'+
+'.pt613card button.go{background:linear-gradient(180deg,#ffd75e,#ffb703);box-shadow:0 4px 0 #c98a00;margin-left:auto}'+
+'.pt613card button.skip{background:transparent;box-shadow:none;color:#6b6380;font-size:17px;padding:12px 8px}'+
+'.pt613card button[disabled]{opacity:.35;pointer-events:none}'+
+'.pt613card .thint{font-size:13px;color:#7a7290;font-weight:700;text-align:center;margin-top:6px}'+
+'#pt613offer{display:flex;align-items:center;justify-content:center;background:rgba(10,20,40,.5)}'+
+'#pt613offer .pt613card{position:relative;left:auto;transform:none;text-align:center;animation:pt613pop .35s ease-out}'+
+'#pt613offer .pt613card .tman{margin:0 auto 6px;width:78px;height:78px;font-size:48px}'+
+'#pt613offer .pt613card .ttext{font-size:24px;margin:6px 0 4px;text-align:center}'+
+'#pt613offer .pt613card .tsub{font-size:18px;font-weight:700;color:#5c5470}'+
+'#pt613offer .pt613card .tbtns{justify-content:center}#pt613offer .pt613card button.go{margin-left:0}'+
+'@keyframes pt613pop{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}'+
+'.pt613how{font-family:inherit;cursor:pointer}'+
+'@media (max-height:520px){.pt613card .ttext{font-size:18px;margin:6px 2px 4px}.pt613card .tman{width:46px;height:46px;font-size:28px}.pt613card button{min-height:42px;padding:8px 14px;font-size:17px}.pt613card{padding:10px 14px 10px}}';
+function el(tag,cls,html){ var e=document.createElement(tag); if(cls) e.className=cls; if(html!=null) e.innerHTML=html; return e; }
+function swallow(node){
+  ['pointerdown','pointerup','mousedown','mouseup','touchstart','touchend','touchmove','click','dblclick','wheel','contextmenu'].forEach(function(t){
+    node.addEventListener(t,function(e){ e.stopPropagation(); if(t==='contextmenu'||t==='wheel'||t==='touchmove') e.preventDefault(); },{passive:false});
+  });
+}
+function build(){
+  if(ROOT) return;
+  var st=el('style'); st.textContent=CSS; document.head.appendChild(st);
+  ROOT=el('div'); ROOT.id='pt613tour'; ROOT.style.display='none'; ROOT.setAttribute('role','dialog'); ROOT.setAttribute('aria-label','How to play');
+  ROOT.style.setProperty('--ptacc',C.accent||'#ffb703');
+  var dim=el('div','tdim'); HOLE=el('div','thole');
+  ARROW=el('div','tarrow','<svg viewBox="0 0 54 54"><path d="M17 4h20v24h11L27 51 6 28h11z" fill="#ffd34d" stroke="#8a3a12" stroke-width="3" stroke-linejoin="round"/></svg>');
+  CARD=el('div','pt613card');
+  ROOT.appendChild(dim); ROOT.appendChild(HOLE); ROOT.appendChild(ARROW); ROOT.appendChild(CARD);
+  swallow(ROOT); document.body.appendChild(ROOT);
+}
+function keycaps(keys){
+  if(!keys||!keys.length) return '';
+  return '<div class="tkeys">'+keys.map(function(k){ return '<span class="kc'+(/^space$/i.test(k)?' wide':'')+'">'+esc(k)+'</span>'; }).join('')+'</div>';
+}
+function render(){
+  var S=C.steps, st=S[I], last=I===S.length-1;
+  var dots=''; for(var j=0;j<S.length;j++) dots+='<i'+(j===I?' class="on"':'')+'></i>';
+  CARD.innerHTML='<div class="thead"><div class="tman">'+esc(C.mascot||'🙂')+'</div><div><div class="tstep">How to play · Step '+(I+1)+' of '+S.length+'</div>'+
+    (st.title?'<div class="ttitle">'+fmt(st.title)+'</div>':'<div class="ttitle">'+esc(C.name||'')+'</div>')+'</div></div>'+
+    '<div class="ttext">'+fmt(st.text)+'</div>'+keycaps(st.keys)+'<div class="tdots">'+dots+'</div>'+
+    '<div class="tbtns"><button class="skip" data-t="skip">Skip ✕</button><button data-t="back"'+(I===0?' disabled':'')+'>◀ Back</button><button class="go" data-t="next">'+(last?(C.doneLabel||"Let's play! ✔"):'Next ▶')+'</button></div>'+
+    '<div class="thint">Enter = next · Esc = skip</div>';
+  CARD.querySelectorAll('button').forEach(function(b){ b.addEventListener('click',function(e){ e.preventDefault(); act(b.getAttribute('data-t')); }); });
+  if(st.scroll){ try{ var se=typeof st.el==='function'?st.el():$(st.el); if(se&&se.scrollIntoView) se.scrollIntoView({block:'center'}); }catch(e){} }
+  place(); tutSay(st.say);
+}
+function place(){
+  if(!OPEN) return;
+  var st=C.steps[I], r=target(st), W=innerWidth, H=innerHeight, ch=CARD.offsetHeight||220, pad=st.pad==null?8:st.pad;
+  if(!r){ CARD.style.left=''; CARD.style.transform=''; HOLE.style.display='none'; ARROW.style.display='none'; ROOT.firstChild.style.display='block'; CARD.style.top=Math.max(8,Math.round(H/2-ch/2))+'px'; return; }
+  ROOT.firstChild.style.display='none'; HOLE.style.display='block';
+  var x=Math.max(2,r.x-pad), y=Math.max(2,r.y-pad), w=Math.min(W-4,r.w+pad*2), h=Math.min(H-4,r.h+pad*2);
+  HOLE.style.left=x+'px'; HOLE.style.top=y+'px'; HOLE.style.width=w+'px'; HOLE.style.height=h+'px';
+  var big=(w*h>W*H*.45), cy=y+h/2, up=cy>H*.5; // target low on screen -> card above it
+  var top;
+  if(big){ ARROW.style.display='none'; top=up?12:H-ch-12; }
+  else {
+    ARROW.style.display='block';
+    var ax=Math.min(W-64,Math.max(4,x+w/2-30));
+    if(up){ var ay=y-64; ARROW.style.transform=''; ARROW.style.left=ax+'px'; ARROW.style.top=Math.max(2,ay)+'px'; top=ay-ch-4; if(top<6){ top=6; } }
+    else { var by=y+h+4; ARROW.style.transform='rotate(180deg)'; ARROW.style.left=ax+'px'; ARROW.style.top=by+'px'; top=by+64; }
+    if(top+ch>H-6) top=Math.max(6,H-ch-6);
+    // card would cover the spotlight: move it to whichever side has more room
+    if(top<y+h&&top+ch>y){ top=(y>H-(y+h))?Math.max(6,y-ch-8):Math.min(H-ch-6,y+h+8);
+      if(top<y+h&&top+ch>y){
+        ARROW.style.display='none';
+        var cw=CARD.offsetWidth||Math.min(560,W*.94), room=Math.max(x, W-(x+w));
+        if(room>=cw+16){ var lx=(x>=W-(x+w))?Math.max(8,x-cw-14):Math.min(W-cw-8,x+w+14);
+          top=Math.min(H-ch-6,Math.max(6,y+h/2-ch/2)); CARD.style.left=lx+'px'; CARD.style.transform='none'; CARD.style.top=Math.round(top)+'px'; return; }
+      }
+    }
+  }
+  CARD.style.left=''; CARD.style.transform='';
+  CARD.style.top=Math.round(top)+'px';
+}
+function act(t){
+  if(!OPEN) return;
+  if(t==='next'){ if(I>=C.steps.length-1) return close(true); I++; render(); fire('step'); }
+  else if(t==='back'){ if(I>0){ I--; render(); fire('step'); } }
+  else if(t==='skip'){ close(false); }
+}
+function fire(ev){ try{ var st=C.steps[I]; if(ev==='step'&&st&&st.onShow) st.onShow(); }catch(e){} }
+function open(from){
+  if(!C) return; hideOffer(); build(); if(OPEN) return;
+  FROM=from||'button'; OPEN=true; I=0;
+  try{ if(C.onOpen) C.onOpen(FROM); }catch(e){}
+  ROOT.style.display='block'; render(); fire('step');
+  clearInterval(TICK); TICK=setInterval(place,400);
+}
+function close(finished){
+  if(!OPEN) return; OPEN=false; clearInterval(TICK);
+  ROOT.style.display='none'; setK(finished?'done':'skipped'); tutHush();
+  try{ if(C.onClose) C.onClose(!!finished,FROM); }catch(e){}
+}
+function hideOffer(){ if(OFFER){ OFFER.remove(); OFFER=null; } }
+function offer(){
+  if(OFFER||OPEN) return; build();
+  OFFER=el('div'); OFFER.id='pt613offer'; OFFER.style.setProperty('--ptacc',C.accent||'#ffb703');
+  OFFER.innerHTML='<div class="pt613card"><div class="tman">'+esc(C.mascot||'🙂')+'</div><div class="ttext">'+fmt(C.offerText||'Shalom! Want a quick tour?')+'</div>'+
+    '<div class="tsub">'+fmt(C.offerSub||'I\'ll show you how to play '+(C.name||'this game')+'.')+'</div>'+
+    '<div class="tbtns"><button data-t="no">No thanks</button><button class="go" data-t="yes">Yes please! 👍</button></div><div class="thint">Enter = yes · Esc = no thanks</div></div>';
+  swallow(OFFER);
+  OFFER.querySelectorAll('button').forEach(function(b){ b.addEventListener('click',function(e){ e.preventDefault(); ans(b.getAttribute('data-t')==='yes'); }); });
+  document.body.appendChild(OFFER); tutSay(C.offerSay);
+}
+function ans(yes){ hideOffer(); if(!yes) tutHush(); setK(yes?'started':'declined'); if(yes) open('offer'); }
+function onKey(e){
+  if(!OPEN&&!OFFER) return;
+  e.stopImmediatePropagation(); e.stopPropagation();
+  if(e.type!=='keydown'){ e.preventDefault(); return; }
+  var k=e.key; e.preventDefault();
+  if(e.repeat) return;
+  var now=Date.now(); if(now-LASTKEY<120) return; LASTKEY=now;
+  if(OFFER){ if(k==='Enter'||k===' '||k==='y'||k==='Y') ans(true); else if(k==='Escape'||k==='n'||k==='N') ans(false); return; }
+  if(k==='Enter'||k==='ArrowRight'||k===' ') act('next');
+  else if(k==='ArrowLeft'||k==='Backspace') act('back');
+  else if(k==='Escape') act('skip');
+}
+function mkBtn(spec,kind){
+  var b=el('button','pt613how '+(spec.cls||''),esc(spec.label||'❓ How to play'));
+  b.type='button'; b.setAttribute('data-pt613how',kind);
+  if(spec.style) b.style.cssText=spec.style;
+  b.addEventListener('click',function(e){ e.preventDefault(); e.stopPropagation(); try{ if(spec.before) spec.before(); }catch(_){} open(kind); });
+  return b;
+}
+function ensure(spec,kind){
+  if(!spec) return;
+  var host; try{ host=typeof spec.into==='function'?spec.into():$(spec.into); }catch(e){ host=null; }
+  if(!host||host.querySelector('[data-pt613how="'+kind+'"]')) return;
+  var b=mkBtn(spec,kind);
+  var ref=null; try{ ref=spec.before_el?(typeof spec.before_el==='function'?spec.before_el():host.querySelector(spec.before_el)):null; }catch(e){}
+  if(ref&&ref.parentNode) ref.parentNode.insertBefore(b,ref); else host.appendChild(b);
+}
+var T0=Date.now();
+function watch(){
+  ensure(C.startButton,'start'); ensure(C.pauseButton,'pause');
+  if(C.extraButtons) C.extraButtons.forEach(function(s,i){ ensure(s,'x'+i); });
+  if(!OPEN&&!OFFER&&!getK()&&Date.now()-T0>(C.offerDelay||900)){
+    var ok=false; try{ ok=C.isStartScreen?!!C.isStartScreen():true; }catch(e){}
+    if(ok){ if(!OFFER_T) OFFER_T=setTimeout(function(){ OFFER_T=0; var ok2=false; try{ ok2=C.isStartScreen?!!C.isStartScreen():true; }catch(e){} if(ok2&&!getK()&&!OPEN) offer(); },500); }
+  }
+}
+window.PT613Tour={
+  setup:function(cfg){
+    C=cfg; var go=function(){ build(); watch(); setInterval(watch,500); };
+    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',go); else go();
+    window.addEventListener('keydown',onKey,true); window.addEventListener('keyup',onKey,true); window.addEventListener('keypress',onKey,true);
+    window.addEventListener('resize',function(){ place(); });
+  },
+  open:open, close:function(){ close(false); }, isOpen:function(){ return OPEN||!!OFFER; },
+  step:function(){ return OPEN?I:-1; }, count:function(){ return C?C.steps.length:0; },
+  next:function(){ act('next'); }, back:function(){ act('back'); }, skip:function(){ act('skip'); },
+  offer:offer, answer:ans, key:function(){ return C?key():null; }
+};
+})();
+
+(function(){
+/* Chess Studio tour: steps point at the start menu, then peek at the board behind it. */
+function peek(on){ try{ window.CS_TOUR&&CS_TOUR.peek(on); }catch(e){} }
+PT613Tour.setup({
+  muted:function(){ return true; },
+  id:'chess-studio', name:'Chess Studio', mascot:'\u2659', accent:'#c98b4a',
+  offerText:'Shalom! Want a quick tour?', offerSub:'I\'ll show you how to set up a game of chess.',
+  steps:[
+    {el:'#oppRow', onShow:function(){peek(false)}, title:'Who do you want to play?', text:'Play the computer on **Easy**, **Medium** or **Hard**, or pick **2 players** and take turns on this computer.'},
+    {el:'#themeRow', onShow:function(){peek(false)}, title:'Pick a look', text:'**Classic** wooden chess, **Colour & Material** where you choose your own colours, marble, glass or gold, or **Brick Chess**, where the pieces walk to their squares!'},
+    {el:'#playBtn', onShow:function(){peek(false)}, title:'Ready?', text:'Press **Play!** to start. White always moves first.', keys:['Enter']},
+    {el:'#boardWrap', onShow:function(){peek(true)}, title:'Moving', text:'**Click a piece**, and dots show every square it can go to. Then **click a dot** to move there.'},
+    {el:'#sideBtns', onShow:function(){peek(true)}, title:'Your buttons', text:'Made a mistake? **Undo** takes it back. **Flip board** turns it around, and **Pieces & board** changes the look any time.'},
+    {el:'#hintBtn', onShow:function(){peek(true)}, title:'Stuck?', text:'Press the **light bulb** (or the **H** key) and an arrow shows you a good move.', keys:['H']},
+    {el:'#musicSw', onShow:function(){peek(true)}, title:'Music', text:'Turn the music **on or off** here.'}
+  ],
+  startButton:{into:'#topbar', label:'How to play', cls:'tb', before_el:'#musicSw'},
+  isStartScreen:function(){ return !!(window.CS_TOUR&&CS_TOUR.menuOn()); },
+  onOpen:function(){ var w=document.getElementById('win'); if(w) w.classList.remove('on'); var l=document.getElementById('look'); if(l) l.classList.remove('on'); },
+  onClose:function(){ peek(false); }
+});
+})();
+
