@@ -1,6 +1,13 @@
 {
  "notes": [
   {
+   "v": "1.0.11",
+   "date": "22 Oct 2026",
+   "items": [
+    "Parents: add your email to Parent controls. “Forgot PIN?” then emails you a reset code (offline: a code to email us for an unlock code). The grown-up sum is gone."
+   ]
+  },
+  {
    "v": "1.0.10",
    "date": "21 Oct 2026",
    "items": [
@@ -41,16 +48,16 @@
    "v": "1.0.5",
    "date": "15 Oct 2026",
    "items": [
-    "\ud83d\udd12 Parents button at the top of the home screen",
+    "🔒 Parents button at the top of the home screen",
     "Works without the internet",
     "Forgot the parent PIN? Use your licence key",
     "New versions now arrive inside the app: tap Update"
    ]
   }
  ],
- "latest": "1.0.10",
+ "latest": "1.0.11",
  "min_app": "1.0.5",
- "manifest": "1.0.10/manifest.json",
+ "manifest": "1.0.11/manifest.json",
  "objects": "objects/",
  "download": "https://github.com/yossi93/playtime613-downloads/releases/download/v1.0.6/Playtime613-Windows.zip",
  "download_page": "https://playtime613.com/",
